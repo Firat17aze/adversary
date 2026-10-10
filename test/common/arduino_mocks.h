@@ -8,6 +8,7 @@
 #ifndef ESP32
 
 #include <cstdarg>
+#include <cstdio>
 #include <string>
 #include <cstring>
 #include "time_mocks.h"
@@ -91,16 +92,31 @@ using test_mocks::String;
 
 namespace test_mocks {
 
+// Serial capture so tests can assert on fail-loud diagnostics as observable behaviour (the output
+// IS the deliverable of the audit read-path review, slice-0045). A free inline global: one
+// definition across every TU, and — being process-local — reset at the start of each native test
+// binary, so it only accumulates across the RUN_TESTs of one suite. Tests clear it in setUp.
+inline std::string g_mockSerialLog;
+inline void mockSerialClear() { g_mockSerialLog.clear(); }
+
 /**
- * Mock Serial class for println/printf functions
+ * Mock Serial class for println/printf functions. Captures into g_mockSerialLog instead of
+ * suppressing, so tests can assert which diagnostic a code path emitted.
  */
 class MockSerial {
 public:
-    void println(const char* msg) { /* suppress */ }
-    void println(const std::string& msg) { /* suppress */ }
-    void printf(const char* fmt, ...) { /* suppress */ }
-    void print(const char* msg) { /* suppress */ }
-    void print(const std::string& msg) { /* suppress */ }
+    void println(const char* msg) { g_mockSerialLog += msg; g_mockSerialLog += '\n'; }
+    void println(const std::string& msg) { g_mockSerialLog += msg; g_mockSerialLog += '\n'; }
+    void printf(const char* fmt, ...) {
+        char buf[256];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        g_mockSerialLog += buf;
+    }
+    void print(const char* msg) { g_mockSerialLog += msg; }
+    void print(const std::string& msg) { g_mockSerialLog += msg; }
 };
 
 extern MockSerial Serial;
@@ -129,6 +145,8 @@ using test_mocks::Serial;
 using test_mocks::ESP;
 using test_mocks::randomSeed;
 using test_mocks::random;
+using test_mocks::g_mockSerialLog;
+using test_mocks::mockSerialClear;
 
 // PROGMEM mocks
 #define PROGMEM

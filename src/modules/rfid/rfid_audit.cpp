@@ -8,6 +8,13 @@
 
 namespace adversary {
 
+namespace {
+// Written to the dump when a data block or a key could not be recovered. Named so the several
+// dump sites cannot drift in byte count or spacing, and so a reader greps one token (slice-0045).
+constexpr const char* UNKNOWN_BLOCK_HEX = "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ??";
+constexpr const char* UNKNOWN_KEY_HEX = "?? ?? ?? ?? ?? ??";
+} // namespace
+
 const uint8_t RfidAudit::DEFAULT_KEYS[][6] = {
     // === Core Defaults ===
     {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, // Default Factory (Key A & B)
@@ -334,28 +341,47 @@ int RfidAudit::runDictionaryAttack(
             
             MFRC522_I2C::MIFARE_Key mfKey;
             memcpy(mfKey.keyByte, readKey, 6);
-            
-            // Read all 4 blocks in this sector
-            for (int block = 0; block < 4; block++) {
-                uint8_t blockAddr = firstBlock + block;
-                uint8_t buffer[18];
-                uint8_t bufferSize = sizeof(buffer);
-                
-                // Authenticate for this block
-                MFRC522_I2C::StatusCode status;
-                if (useKeyA) {
-                    status = (MFRC522_I2C::StatusCode)m_rfid->PCD_Authenticate(
-                        MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &mfKey, &(m_rfid->uid));
-                } else {
-                    status = (MFRC522_I2C::StatusCode)m_rfid->PCD_Authenticate(
-                        MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_B, blockAddr, &mfKey, &(m_rfid->uid));
+
+            // One PCD_Authenticate authenticates the WHOLE sector: re-select the card for a clean
+            // state (the dictionary left it mid-handshake), authenticate once against the first
+            // block, then read all four blocks under that single crypto session. Re-authenticating
+            // per block -- as this did -- issues a second auth with no re-select in between, which
+            // the WS1850S NAKs, so blocks 2-4 of every sector came back '??' (slice-0046).
+            //
+            // HALT before WUPA: the dictionary leaves the tag ACTIVE, and an ACTIVE tag ignores
+            // WUPA, so a bare WakeupA here left the tag unselected and the auth timed out
+            // (status 4, field-observed on 23FF9C1E). Halting first lets WUPA wake it cleanly,
+            // matching the initial select and the writer's selectCard().
+            m_rfid->PCD_StopCrypto1();
+            m_rfid->PICC_HaltA();
+            delay(20);
+            byte readATQA[2];
+            byte readATQASize = sizeof(readATQA);
+            m_rfid->PICC_WakeupA(readATQA, &readATQASize);
+            m_rfid->PICC_ReadCardSerial();
+
+            MFRC522_I2C::StatusCode authStatus = (MFRC522_I2C::StatusCode)m_rfid->PCD_Authenticate(
+                useKeyA ? MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_A : MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_B,
+                firstBlock, &mfKey, &(m_rfid->uid));
+
+            if (authStatus != MFRC522_I2C::STATUS_OK) {
+                // The whole sector will not authenticate for reading despite a cracked key --
+                // placeholder all four blocks and say so once (slice-0045/0046).
+                Serial.printf("[RFID] Sector %d: AUTH FAILED for read with cracked key (status %d) -> 4x ?? in dump\n",
+                              s, authStatus);
+                for (int block = 0; block < 4; block++) {
+                    dumpFile.printf("Block %d: %s\n", firstBlock + block, UNKNOWN_BLOCK_HEX);
                 }
-                
-                if (status == MFRC522_I2C::STATUS_OK) {
-                    status = (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Read(blockAddr, buffer, &bufferSize);
-                    
-                    if (status == MFRC522_I2C::STATUS_OK) {
-                        // Write block data to file
+            } else {
+                for (int block = 0; block < 4; block++) {
+                    uint8_t blockAddr = firstBlock + block;
+                    uint8_t buffer[18];
+                    uint8_t bufferSize = sizeof(buffer);
+
+                    MFRC522_I2C::StatusCode readStatus =
+                        (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Read(blockAddr, buffer, &bufferSize);
+
+                    if (readStatus == MFRC522_I2C::STATUS_OK) {
                         dumpFile.printf("Block %d: ", blockAddr);
                         for (int i = 0; i < 16; i++) {
                             dumpFile.printf("%02X", buffer[i]);
@@ -363,16 +389,16 @@ int RfidAudit::runDictionaryAttack(
                         }
                         dumpFile.println();
                     } else {
-                        // Write placeholder for unreadable block
-                        dumpFile.printf("Block %d: ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ??\n", blockAddr);
+                        // Auth held for the sector but this block would not read back. Fail loud
+                        // with the status so a '??' here is a read miss, not a key miss (slice-0045).
+                        Serial.printf("[RFID] Sector %d block %d: READ FAILED (auth OK, MIFARE_Read status %d) -> ?? in dump\n",
+                                      s, blockAddr, readStatus);
+                        dumpFile.printf("Block %d: %s\n", blockAddr, UNKNOWN_BLOCK_HEX);
                     }
-                } else {
-                    dumpFile.printf("Block %d: ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ??\n", blockAddr);
                 }
-                
-                m_rfid->PCD_StopCrypto1();
             }
-            
+            m_rfid->PCD_StopCrypto1();  // close the sector's crypto session once
+
             // Write keys to file
             dumpFile.printf("Key A: ");
             if (sectorData.keyAFound) {
@@ -381,10 +407,10 @@ int RfidAudit::runDictionaryAttack(
                     if (i < 5) dumpFile.print(" ");
                 }
             } else {
-                dumpFile.print("?? ?? ?? ?? ?? ??");
+                dumpFile.print(UNKNOWN_KEY_HEX);
             }
             dumpFile.println();
-            
+
             dumpFile.printf("Key B: ");
             if (sectorData.keyBFound) {
                 for (int i = 0; i < 6; i++) {
@@ -392,14 +418,19 @@ int RfidAudit::runDictionaryAttack(
                     if (i < 5) dumpFile.print(" ");
                 }
             } else {
-                dumpFile.print("?? ?? ?? ?? ?? ??");
+                dumpFile.print(UNKNOWN_KEY_HEX);
             }
             dumpFile.println();
             dumpFile.println();  // Blank line between sectors
-            
-            // Re-select card after block reads
-            m_rfid->PICC_WakeupA(nullptr, nullptr);
-            m_rfid->PICC_ReadCardSerial();
+
+            // No re-select needed here: this sector's read already re-selected at its start, and
+            // the next sector re-selects before its own dictionary pass (slice-0046).
+        } else if (opts.readData && dumpFile) {
+            // No dictionary key for this sector, so it is omitted from the dump entirely (the
+            // block/key write above is gated on a key). Say so loudly rather than leaving a silent
+            // gap -- this is the dominant cause of missing sectors on a card with non-default keys
+            // (slice-0045).
+            Serial.printf("[RFID] Sector %d: no dictionary key found -> omitted from dump (4 data blocks unreadable, keys unknown)\n", s);
         }
         
         // Debug: sector summary

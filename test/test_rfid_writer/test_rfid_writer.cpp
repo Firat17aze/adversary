@@ -52,6 +52,8 @@ void setUp() {
     g_mockBlock0Nak = false;
     g_mockAuthFails = false;
     g_mockMfrcVersion = 0x92;
+    g_mockReauthNeedsReselect = false;
+    g_mockSelectedSinceAuth = true;
 }
 void tearDown() {}
 
@@ -141,6 +143,23 @@ void test_writer_uid_success_reports_gen2() {
     TEST_ASSERT_TRUE(result.uidResult.find("Gen2") != std::string::npos);
 }
 
+// slice-0046: on a reader that NAKs a re-auth without a re-select, a sector whose dump keys are
+// absent (factory-only path, a single auth attempt) must still write all its blocks under one
+// per-sector authentication. Fails before the fix: the per-block pattern desyncs, so the sector's
+// first block fails the lone factory attempt with no fallback and is counted failedAuth.
+void test_writer_writes_all_blocks_in_factory_only_sector() {
+    NfcDump dump = parseNfcDump(kDumpNoSector1Key);  // sector 1 (blocks 4,5,6) has no key
+    WritePlan plan = buildWritePlan(dump);
+    MFRC522_I2C rfid(0x28, -1);
+    RfidWriter writer(&rfid);
+    g_mockReauthNeedsReselect = true;
+
+    WriteResult result = writer.restore(plan, dump, /*includeUid=*/false);
+
+    TEST_ASSERT_EQUAL_INT((int)plan.dataWrites.size(), result.blocksWritten);
+    TEST_ASSERT_EQUAL_INT(0, result.failedAuth);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_writer_writes_all_planned_data_blocks);
@@ -148,5 +167,6 @@ int main() {
     RUN_TEST(test_writer_failed_auth_is_counted_not_written);
     RUN_TEST(test_writer_uid_locked_reports_and_does_not_abort);
     RUN_TEST(test_writer_uid_success_reports_gen2);
+    RUN_TEST(test_writer_writes_all_blocks_in_factory_only_sector);
     return UNITY_END();
 }

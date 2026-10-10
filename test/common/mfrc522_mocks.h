@@ -50,6 +50,19 @@ inline bool g_mockBlock0Nak = false;
 // target, so the writer's failedAuth path is reachable despite the factory-FF fallback.
 inline bool g_mockAuthFails = false;
 
+// When true, MIFARE_Read returns an error even after a successful auth — models a block that
+// authenticates but will not read back, so the audit's read-fail diagnostic is distinguishable
+// from its auth-fail diagnostic (slice-0045).
+inline bool g_mockReadFails = false;
+
+// Re-auth desync model (slice-0046): a real WS1850S/clone NAKs a second PCD_Authenticate issued
+// without an intervening card re-select, even after StopCrypto1 — the root cause of blocks 2-4 of
+// every sector reading '??'. When on, a successful auth "consumes" the current selection and the
+// next auth fails (STATUS_ERROR) until a re-select (WakeupA/RequestA/ReadCardSerial/Select)
+// restores it. Off by default so the per-block callers' existing tests are unaffected.
+inline bool g_mockReauthNeedsReselect = false;
+inline bool g_mockSelectedSinceAuth = true;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -110,13 +123,14 @@ public:
     void PCD_AntennaOn() {}
     void PCD_AntennaOff() {}
     bool PICC_IsNewCardPresent() { return true; }
-    bool PICC_ReadCardSerial() { return true; }
+    bool PICC_ReadCardSerial() { g_mockSelectedSinceAuth = true; return true; }
     void PICC_HaltA() {}
-    void PCD_StopCrypto1() {}
-    
-    byte PICC_WakeupA(byte* bufferATQA, byte* bufferSize) { return STATUS_OK; }
-    byte PICC_RequestA(byte* bufferATQA, byte* bufferSize) { return STATUS_OK; }
-    byte PICC_Select(Uid* uid, byte validBits = 0) { return STATUS_OK; }
+    void PCD_StopCrypto1() {}  // intentionally does NOT re-select: StopCrypto1 alone cannot clear
+                               // the desync the real card exhibits (slice-0046).
+
+    byte PICC_WakeupA(byte* bufferATQA, byte* bufferSize) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
+    byte PICC_RequestA(byte* bufferATQA, byte* bufferSize) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
+    byte PICC_Select(Uid* uid, byte validBits = 0) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
 
     // Gen1a backdoor probe: a real magic card ACKs the 0x40/0x43 sequence; an
     // ordinary card does not. The real driver collapses "ordinary card" and
@@ -130,9 +144,13 @@ public:
 
     byte PCD_Authenticate(byte command, byte blockAddr, MIFARE_Key* key, Uid* uid) {
         if (g_mockAuthFails) return STATUS_ERROR;
-        if (key->keyByte[0] == 0xFF && key->keyByte[1] == 0xFF) return STATUS_OK;
-        if (key->keyByte[0] == 0xA0 && key->keyByte[1] == 0xA1) return STATUS_OK;
-        return STATUS_ERROR;
+        // A re-auth without an intervening re-select NAKs on the real reader (slice-0046).
+        if (g_mockReauthNeedsReselect && !g_mockSelectedSinceAuth) return STATUS_ERROR;
+        bool keyOk = (key->keyByte[0] == 0xFF && key->keyByte[1] == 0xFF) ||
+                     (key->keyByte[0] == 0xA0 && key->keyByte[1] == 0xA1);
+        if (!keyOk) return STATUS_ERROR;
+        g_mockSelectedSinceAuth = false;  // a successful auth consumes the selection
+        return STATUS_OK;
     }
 
     byte MIFARE_Write(byte blockAddr, byte* buffer, byte bufferSize) {
@@ -162,6 +180,7 @@ public:
     }
 
     byte MIFARE_Read(byte blockAddr, byte* buffer, byte* bufferSize) {
+        if (g_mockReadFails) return STATUS_ERROR;
         if (buffer && bufferSize && *bufferSize >= 18) {
             memset(buffer, 0, 18);
         }

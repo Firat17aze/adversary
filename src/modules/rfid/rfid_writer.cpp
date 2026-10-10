@@ -86,11 +86,28 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
     result.cardSelected = true;
 
     int done = 0;
+    // One PCD_Authenticate covers a whole sector; re-authenticating per block issues a second auth
+    // with no intervening re-select, which the reader NAKs, so every block after a sector's first
+    // fails (slice-0046). Writes are addr-ordered, so a sector's blocks are contiguous: authenticate
+    // only on a sector change, keep the crypto session open across that sector's blocks, and
+    // StopCrypto1 once when the sector changes or the plan ends.
+    int authedSector = -1;   // sector the card is currently authenticated to (-1 = none)
+    bool sectorAuthed = false;
     for (const WritePlanItem& item : plan.dataWrites) {
-        if (!authBlock(dump, item.sector, item.addr)) {
+        if (item.sector != authedSector) {
+            if (sectorAuthed) m_rfid->PCD_StopCrypto1();  // close the previous sector's session
+            authedSector = item.sector;
+            selectCard();
+            sectorAuthed = authBlock(dump, item.sector, item.addr);
+            if (!sectorAuthed) {
+                Serial.printf("[RFID] Write: sector %d auth failed\n", item.sector);
+            }
+        }
+
+        if (!sectorAuthed) {
             result.failedAuth++;
-            Serial.printf("[RFID] Write: sector %d auth failed, block %d skipped\n",
-                          item.sector, item.addr);
+            Serial.printf("[RFID] Write: block %d skipped (sector %d not authenticated)\n",
+                          item.addr, item.sector);
         } else {
             byte buffer[MIFARE_BLOCK_SIZE];
             memcpy(buffer, item.bytes, MIFARE_BLOCK_SIZE);
@@ -102,11 +119,11 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
                 result.failedWrite++;
                 Serial.printf("[RFID] Write: block %d NAK (status %d)\n", item.addr, status);
             }
-            m_rfid->PCD_StopCrypto1();
         }
         done++;
         if (onProgress) onProgress({done, result.totalPlanned, item.addr});
     }
+    if (sectorAuthed) m_rfid->PCD_StopCrypto1();  // close the last sector's session
 
     if (includeUid && plan.hasManufacturer) {
         result.uidAttempted = true;
