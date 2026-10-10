@@ -55,6 +55,10 @@ void setUp() {
     g_mockReauthNeedsReselect = false;
     g_mockSelectedSinceAuth = true;
     g_mockWriteFailFirstN = 0;
+    g_mockMagicGen1a = false;   // slice-0048: a test opts a card into Gen1a; others see ordinary
+    g_mockBackdoorOpen = false;
+    g_mockMagicAckOnAttempt = 0;  // 0 = backdoor verdict follows g_mockMagicGen1a (no flakiness)
+    g_mockBackdoorCalls = 0;
 }
 void tearDown() {}
 
@@ -106,8 +110,10 @@ void test_writer_failed_auth_is_counted_not_written() {
     TEST_ASSERT_EQUAL_UINT32(0, g_mockWrites.size());  // nothing written without auth
 }
 
-// DoD scenario 3: an ordinary card's locked block 0 NAKs; it is reported as the Gen2/CUID
-// verdict and the data writes still complete — the locked UID is an expected negative.
+// DoD scenario 3 (slice-0048 ordinary-card negative): an ordinary card's block 0 NAKs the direct
+// write AND does not ACK the backdoor, so both UID strategies fail loud and it is reported as a
+// non-magic locked block — while the data writes still complete. g_mockMagicGen1a stays false
+// (setUp), so MIFARE_OpenUidBackdoor is refused.
 void test_writer_uid_locked_reports_and_does_not_abort() {
     NfcDump dump = parseNfcDump(kDump);
     WritePlan plan = buildWritePlan(dump);
@@ -120,14 +126,12 @@ void test_writer_uid_locked_reports_and_does_not_abort() {
     TEST_ASSERT_TRUE(result.uidAttempted);
     TEST_ASSERT_FALSE(result.uidWritten);
     TEST_ASSERT_TRUE(result.uidResult.find("locked") != std::string::npos);
+    // A NAK'd block-0 write lands nothing, so no block-0 record exists.
+    for (const auto& w : g_mockWrites) {
+        TEST_ASSERT_NOT_EQUAL(0, w.addr);
+    }
     // Data writes completed despite the UID failure.
     TEST_ASSERT_EQUAL_INT((int)plan.dataWrites.size(), result.blocksWritten);
-    // The block-0 write was actually attempted.
-    bool attemptedBlock0 = false;
-    for (const auto& w : g_mockWrites) {
-        if (w.addr == 0) attemptedBlock0 = true;
-    }
-    TEST_ASSERT_TRUE(attemptedBlock0);
 }
 
 void test_writer_uid_success_reports_gen2() {
@@ -181,6 +185,52 @@ void test_writer_retries_transient_write_nak() {
     TEST_ASSERT_EQUAL_INT(0, result.failedAuth);
 }
 
+// slice-0048: a Gen1a card's block 0 NAKs the direct (authenticated) write but is rewritable once
+// the backdoor is open. The writer must fall through from the failed direct write to the backdoor,
+// land the UID, and report the Gen1a verdict. Fails before the fix: with no backdoor strategy the
+// direct NAK ends the step as a locked/non-written block 0.
+void test_writer_clones_uid_via_gen1a_backdoor() {
+    NfcDump dump = parseNfcDump(kDump);
+    WritePlan plan = buildWritePlan(dump);
+    MFRC522_I2C rfid(0x28, -1);
+    RfidWriter writer(&rfid);
+    g_mockBlock0Nak = true;    // a normal write to block 0 is refused (Gen1a is read-only to it)
+    g_mockMagicGen1a = true;   // but the card ACKs the backdoor
+
+    WriteResult result = writer.restore(plan, dump, /*includeUid=*/true);
+
+    TEST_ASSERT_TRUE(result.uidAttempted);
+    TEST_ASSERT_TRUE(result.uidWritten);
+    TEST_ASSERT_TRUE(result.uidResult.find("Gen1a") != std::string::npos);
+    // The backdoor write actually landed block 0.
+    bool wroteBlock0 = false;
+    for (const auto& w : g_mockWrites) {
+        if (w.addr == 0) wroteBlock0 = true;
+    }
+    TEST_ASSERT_TRUE(wroteBlock0);
+    // Data blocks still all wrote.
+    TEST_ASSERT_EQUAL_INT((int)plan.dataWrites.size(), result.blocksWritten);
+}
+
+// slice-0048 on-device round 1: the Gen1a backdoor open is timing-sensitive and misses on the first
+// try (the detector already retries it — slice-0044), so the writer's UID backdoor must retry too or
+// a genuinely magic card (23FF9C1E: detected MAGIC: YES, but the single-shot write open failed) is
+// misreported as an ordinary locked block. Models a backdoor that only ACKs on the 3rd open: fails
+// before the retry loop (single-shot open → "locked", uidWritten false), passes after.
+void test_writer_retries_flaky_gen1a_backdoor() {
+    NfcDump dump = parseNfcDump(kDump);
+    WritePlan plan = buildWritePlan(dump);
+    MFRC522_I2C rfid(0x28, -1);
+    RfidWriter writer(&rfid);
+    g_mockBlock0Nak = true;        // direct write refused
+    g_mockMagicAckOnAttempt = 3;   // backdoor ACKs only on the 3rd open attempt
+
+    WriteResult result = writer.restore(plan, dump, /*includeUid=*/true);
+
+    TEST_ASSERT_TRUE(result.uidWritten);
+    TEST_ASSERT_TRUE(result.uidResult.find("Gen1a") != std::string::npos);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_writer_writes_all_planned_data_blocks);
@@ -190,5 +240,7 @@ int main() {
     RUN_TEST(test_writer_uid_success_reports_gen2);
     RUN_TEST(test_writer_writes_all_blocks_in_factory_only_sector);
     RUN_TEST(test_writer_retries_transient_write_nak);
+    RUN_TEST(test_writer_clones_uid_via_gen1a_backdoor);
+    RUN_TEST(test_writer_retries_flaky_gen1a_backdoor);
     return UNITY_END();
 }

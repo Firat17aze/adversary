@@ -46,9 +46,12 @@ public:
 
     /**
      * @brief Restore a write plan onto the card currently on the reader.
-     * @param includeUid When true, additionally attempt a plain MIFARE_Write to block 0 — which
-     *        succeeds only on a Gen2/CUID direct-write card and is reported as the definitive
-     *        Gen2/CUID verdict. Fails loud (NAK reported) on an ordinary card's locked block 0.
+     * @param includeUid When true, additionally attempt to write block 0 (the UID) by two
+     *        strategies, reporting which one landed (slice-0048): first an authenticated
+     *        MIFARE_Write (Gen2/CUID direct-write magic), then — if that does not land — the
+     *        unauthenticated Gen1a backdoor (MIFARE_OpenUidBackdoor → MIFARE_Write). An ordinary
+     *        card's locked block 0 fails both and is reported loud as non-magic; the data-block
+     *        writes complete regardless.
      */
     WriteResult restore(const WritePlan& plan, const NfcDump& dump, bool includeUid,
                         std::function<void(const WriteProgress&)> onProgress = nullptr);

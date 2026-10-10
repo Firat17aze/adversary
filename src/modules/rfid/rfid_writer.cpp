@@ -19,6 +19,13 @@ constexpr uint8_t FACTORY_KEY[MIFARE_KEY_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
 // heavier than a wake, the field miss cleared on the next pass, and a genuinely locked block must
 // not stall three extra full re-select+re-auth cycles (slice-0047).
 constexpr int WRITE_ATTEMPTS = 3;
+
+// The Gen1a backdoor wake is timing-sensitive: a single MIFARE_OpenUidBackdoor gives false
+// negatives (slice-0044 proved the same card reads NO then YES), so a single-shot open misreports a
+// genuinely magic card as an ordinary locked block. Retry the open with a re-select between tries,
+// matching the detector's MAGIC_PROBE_ATTEMPTS (field: 23FF9C1E detected MAGIC: YES yet the writer's
+// single-shot open failed — slice-0048 on-device round 1).
+constexpr int BACKDOOR_OPEN_ATTEMPTS = 5;
 }
 
 RfidWriter::RfidWriter(MFRC522_I2C* rfid) : m_rfid(rfid) {}
@@ -158,22 +165,53 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
 
     if (includeUid && plan.hasManufacturer) {
         result.uidAttempted = true;
-        // Block 0 lives in sector 0; re-select after the data writes, then attempt the write.
+        byte buffer[MIFARE_BLOCK_SIZE];
+        memcpy(buffer, plan.manufacturer.bytes, MIFARE_BLOCK_SIZE);
+
+        // Block 0 is the manufacturer block; two card families make it rewritable by two different
+        // paths, so we try both and let the outcome classify the card (slice-0048).
+        //
+        // Strategy 1 - Gen2/CUID direct write: an authenticated write to block 0, which only a
+        // direct-write magic card accepts. A sector-0 auth failure is NOT terminal here: strategy 2
+        // needs no auth, so fall through to it rather than giving up (a Gen1a whose sector-0 keys we
+        // do not hold still clones its UID via the backdoor).
         selectCard();
-        if (!authBlock(dump, 0, 0)) {
-            result.uidResult = "UID not written - sector 0 auth failed";
-        } else {
-            byte buffer[MIFARE_BLOCK_SIZE];
-            memcpy(buffer, plan.manufacturer.bytes, MIFARE_BLOCK_SIZE);
+        if (authBlock(dump, 0, 0)) {
             MFRC522_I2C::StatusCode status =
                 (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Write(0, buffer, MIFARE_BLOCK_SIZE);
             if (status == MFRC522_I2C::STATUS_OK) {
                 result.uidWritten = true;
                 result.uidResult = "UID written - Gen2/CUID direct-write magic confirmed";
-            } else {
-                result.uidResult = "UID not written - block 0 locked (ordinary / not Gen2-CUID)";
             }
-            m_rfid->PCD_StopCrypto1();
+            m_rfid->PCD_StopCrypto1();  // close the crypto session strategy 1 opened
+        }
+
+        // Strategy 2 - Gen1a backdoor: block 0 is rewritable only after the 0x40/0x43 backdoor opens
+        // it (unauthenticated, the same sequence probeMagicGen1a() ACKs for detection). Reached only
+        // when the direct write did not land. A backdoor ACK followed by a write NAK is surfaced,
+        // not masked - the card answered the backdoor but refused the write (fail loud).
+        if (!result.uidWritten) {
+            // Retry the backdoor open with a re-select between tries (OpenUidBackdoor halts the tag
+            // on failure, so the next try must re-select first) — a single attempt false-negatives
+            // on a real Gen1a (slice-0044 / slice-0048 on-device).
+            bool backdoorOpen = false;
+            for (int attempt = 0; attempt < BACKDOOR_OPEN_ATTEMPTS && !backdoorOpen; attempt++) {
+                selectCard();  // clean ACTIVE state for the backdoor sequence
+                backdoorOpen = m_rfid->MIFARE_OpenUidBackdoor(false);
+            }
+            if (!backdoorOpen) {
+                result.uidResult = "UID not written - block 0 locked (ordinary card, not magic)";
+            } else {
+                MFRC522_I2C::StatusCode status =
+                    (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Write(0, buffer, MIFARE_BLOCK_SIZE);
+                if (status == MFRC522_I2C::STATUS_OK) {
+                    result.uidWritten = true;
+                    result.uidResult = "UID written - Gen1a backdoor magic confirmed";
+                } else {
+                    result.uidResult =
+                        "UID not written - Gen1a backdoor opened but block 0 write NAK'd";
+                }
+            }
         }
         done++;
         if (onProgress) onProgress({done, result.totalPlanned, 0});

@@ -69,6 +69,13 @@ inline bool g_mockSelectedSinceAuth = true;
 // so every existing writer test is unaffected.
 inline int g_mockWriteFailFirstN = 0;
 
+// Gen1a backdoor-write model (slice-0048): a Gen1a card's block 0 is read-only to a normal write
+// (so g_mockBlock0Nak NAKs it) but becomes writable once MIFARE_OpenUidBackdoor has opened it. This
+// flag is set by a successful OpenUidBackdoor and cleared by any re-select (HaltA), so a block-0
+// write issued while it is true lands even under g_mockBlock0Nak — modelling the backdoor path. An
+// ordinary card (g_mockMagicGen1a false) never ACKs the backdoor, so the flag never goes true.
+inline bool g_mockBackdoorOpen = false;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -130,7 +137,7 @@ public:
     void PCD_AntennaOff() {}
     bool PICC_IsNewCardPresent() { return true; }
     bool PICC_ReadCardSerial() { g_mockSelectedSinceAuth = true; return true; }
-    void PICC_HaltA() {}
+    void PICC_HaltA() { g_mockBackdoorOpen = false; }  // halting closes the Gen1a backdoor (slice-0048)
     void PCD_StopCrypto1() {}  // intentionally does NOT re-select: StopCrypto1 alone cannot clear
                                // the desync the real card exhibits (slice-0046).
 
@@ -144,8 +151,10 @@ public:
     // caller's fail-loud handling lives in the post-probe re-select, not here.
     bool MIFARE_OpenUidBackdoor(bool /*logErrors*/) {
         g_mockBackdoorCalls++;
-        if (g_mockMagicAckOnAttempt > 0) return g_mockBackdoorCalls >= g_mockMagicAckOnAttempt;
-        return g_mockMagicGen1a;
+        bool ack = (g_mockMagicAckOnAttempt > 0) ? (g_mockBackdoorCalls >= g_mockMagicAckOnAttempt)
+                                                 : g_mockMagicGen1a;
+        g_mockBackdoorOpen = ack;  // a true ACK leaves block 0 writable until the next re-select
+        return ack;
     }
 
     byte PCD_Authenticate(byte command, byte blockAddr, MIFARE_Key* key, Uid* uid) {
@@ -164,6 +173,9 @@ public:
             g_mockWriteFailFirstN--;  // a timed-out transceive does not land — no record
             return STATUS_TIMEOUT;
         }
+        // A locked block 0 NAKs a normal write and does not land — unless the Gen1a backdoor is open
+        // (slice-0048). A NAK is recorded nowhere, mirroring the transient case above.
+        if (blockAddr == 0 && g_mockBlock0Nak && !g_mockBackdoorOpen) return STATUS_MIFARE_NACK;
         MockMifareWrite record;
         record.addr = blockAddr;
         memset(record.bytes, 0, sizeof(record.bytes));
@@ -171,7 +183,6 @@ public:
             memcpy(record.bytes, buffer, bufferSize < 16 ? bufferSize : 16);
         }
         g_mockWrites.push_back(record);
-        if (blockAddr == 0 && g_mockBlock0Nak) return STATUS_MIFARE_NACK;
         return STATUS_OK;
     }
 
