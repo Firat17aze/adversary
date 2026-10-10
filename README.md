@@ -118,6 +118,8 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 
 ### RFID
 - **RFID Audit** - MFRC522-based (13.56 MHz, I2C) NFC/RFID tag reading and dumping.
+- **RFID Write / Clone** - Restore a saved `.nfc` dump onto a MIFARE Classic 1K card: all data blocks with the recovered keys, plus optional UID cloning on magic cards (Gen2/CUID direct-write and Gen1a backdoor). Reports the detected card type and every block outcome.
+- **Magic card detection** - Flags UID-rewritable (Gen1a) cards via a backdoor probe.
 
 ### Modules
 - **Module inventory & hot-swap re-scan** - A live view of which peripherals are attached right now (Sub-GHz/2.4 GHz cap, RFID reader, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. Seat the module while the radio bus is idle, then Re-scan.
@@ -378,7 +380,7 @@ Main Carousel
 │   ├── TV-B-Gone          - Universal IR power-off blast
 │   └── Record / Replay    - Learn & replay an IR remote (requires cap IR RX)
 ├── RFID
-│   └── RFID Dashboard     - NFC/RFID tag reading (requires MFRC522 I2C reader)
+│   └── RFID Dashboard     - NFC/RFID read, audit & write/clone (requires MFRC522 I2C reader)
 ├── HID
 │   ├── BadUSB (HID)       - USB keystroke injection (Cardputer only)
 │   └── Mouse Jiggler      - Anti-idle-lock mouse movement (Cardputer only)

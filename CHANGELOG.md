@@ -7,6 +7,14 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-11 (v0.3.0-alpha)
+- **RFID Write / clone.** Restore a saved `.nfc` dump onto a MIFARE Classic 1K card — all 47 data blocks written back with the recovered keys (Key A → Key B → factory-FF fallback), with a per-block write-retry so a transient RF warm-up can't drop a block on the first pass. Every outcome is reported (blocks written, auth failures, write failures); nothing is silently skipped. (slices 0043, 0046, 0047)
+- **UID cloning on magic cards.** The opt-in UID write now lands block 0 on both card families: a Gen2/CUID direct write, and — falling through when that is refused — the Gen1a backdoor. The firmware reports which card type it detected; an ordinary card's locked UID is reported plainly, not masked. Verified end-to-end on a Gen1a card (UID written, read back, then restored). (slice-0048)
+- **Reliable Gen1a magic detection and sector reads.** Detection retries the timing-sensitive backdoor probe so a magic card is not missed on the first try; the audit read path authenticates once per sector (the fix for sectors reading back as `??`) and names every read/auth failure instead of failing silently. (slices 0044, 0045, 0046)
+- **Dashboard web AP is WPA2-protected.** The on-device dashboard access point now uses an auto-generated per-device key instead of being open. (#45)
+- **Sniffer capture survives an attack handoff.** WiFi is re-initialised on sniffer start, so launching a capture after an attack no longer comes up dead. (#52)
+- **Root-menu list items live-gate on Re-scan.** Menu entries for a module seated after boot (RFID, Wardriving, Captures, BadBLE) un-grey as soon as a Re-scan finds the hardware, no reboot. (slice-0042)
+
 ## 2026-09-23 (v0.2.0-alpha)
 - **Captured credentials are no longer printed to the serial console.** The captive-portal login handler logged harvested usernames and passwords in cleartext via an unconditional `Serial.printf`; it now logs only a secret-free capture count, and the leftover debug pointer prints were removed. (slice-0035)
 - **Screenshots save reliably from memory-heavy screens.** Fn+S now streams the BMP to SD row-by-row instead of allocating the whole ~97 KB file at once, so a capture from a full Scanner or Sniffer list no longer fails with an out-of-memory error on the no-PSRAM device. (slice-0034)
