@@ -54,6 +54,7 @@ void setUp() {
     g_mockMfrcVersion = 0x92;
     g_mockReauthNeedsReselect = false;
     g_mockSelectedSinceAuth = true;
+    g_mockWriteFailFirstN = 0;
 }
 void tearDown() {}
 
@@ -160,6 +161,26 @@ void test_writer_writes_all_blocks_in_factory_only_sector() {
     TEST_ASSERT_EQUAL_INT(0, result.failedAuth);
 }
 
+// slice-0047: the first write-back pass after the antenna powers on drops early blocks to a
+// transient NAK/timeout (field: 5 blocks lost to status 4, a second pass wrote them all). A
+// bounded retry — re-selecting and re-authenticating the sector between attempts — must land every
+// block on the first pass. Fails before the fix: the one-shot write records each warm-up miss as a
+// permanent failedWrite, so the first two planned blocks never land.
+void test_writer_retries_transient_write_nak() {
+    NfcDump dump = parseNfcDump(kDump);
+    WritePlan plan = buildWritePlan(dump);  // data blocks 1,2,4,5,6
+    MFRC522_I2C rfid(0x28, -1);
+    RfidWriter writer(&rfid);
+    g_mockWriteFailFirstN = 2;  // first two writes time out (warm-up), then the reader settles
+
+    WriteResult result = writer.restore(plan, dump, /*includeUid=*/false);
+
+    // Every planned block lands despite the two transient misses — none left as a permanent fail.
+    TEST_ASSERT_EQUAL_INT((int)plan.dataWrites.size(), result.blocksWritten);
+    TEST_ASSERT_EQUAL_INT(0, result.failedWrite);
+    TEST_ASSERT_EQUAL_INT(0, result.failedAuth);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_writer_writes_all_planned_data_blocks);
@@ -168,5 +189,6 @@ int main() {
     RUN_TEST(test_writer_uid_locked_reports_and_does_not_abort);
     RUN_TEST(test_writer_uid_success_reports_gen2);
     RUN_TEST(test_writer_writes_all_blocks_in_factory_only_sector);
+    RUN_TEST(test_writer_retries_transient_write_nak);
     return UNITY_END();
 }

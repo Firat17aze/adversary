@@ -63,6 +63,12 @@ inline bool g_mockReadFails = false;
 inline bool g_mockReauthNeedsReselect = false;
 inline bool g_mockSelectedSinceAuth = true;
 
+// Transient-write model (slice-0047): the first N MIFARE_Write calls return STATUS_TIMEOUT without
+// recording the write, reproducing the antenna RF warm-up that drops a clone's early blocks on the
+// first write-back pass. Each call consumes one; at 0, writes succeed normally. Off by default (0),
+// so every existing writer test is unaffected.
+inline int g_mockWriteFailFirstN = 0;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -154,6 +160,10 @@ public:
     }
 
     byte MIFARE_Write(byte blockAddr, byte* buffer, byte bufferSize) {
+        if (g_mockWriteFailFirstN > 0) {
+            g_mockWriteFailFirstN--;  // a timed-out transceive does not land — no record
+            return STATUS_TIMEOUT;
+        }
         MockMifareWrite record;
         record.addr = blockAddr;
         memset(record.bytes, 0, sizeof(record.bytes));

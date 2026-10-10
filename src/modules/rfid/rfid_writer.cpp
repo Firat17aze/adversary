@@ -11,6 +11,14 @@ namespace adversary {
 
 namespace {
 constexpr uint8_t FACTORY_KEY[MIFARE_KEY_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+// A data-block write that NAKs/times out on the first attempt is usually a transient RF warm-up
+// (field: the first write-back after the antenna powers on dropped 5 early blocks to status 4,
+// a second pass wrote them all). Retry a bounded number of times, re-selecting and
+// re-authenticating the sector between attempts. 3, not the probe/select loops' 5: a write is far
+// heavier than a wake, the field miss cleared on the next pass, and a genuinely locked block must
+// not stall three extra full re-select+re-auth cycles (slice-0047).
+constexpr int WRITE_ATTEMPTS = 3;
 }
 
 RfidWriter::RfidWriter(MFRC522_I2C* rfid) : m_rfid(rfid) {}
@@ -111,13 +119,36 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
         } else {
             byte buffer[MIFARE_BLOCK_SIZE];
             memcpy(buffer, item.bytes, MIFARE_BLOCK_SIZE);
-            MFRC522_I2C::StatusCode status =
-                (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Write(item.addr, buffer, MIFARE_BLOCK_SIZE);
+            MFRC522_I2C::StatusCode status = MFRC522_I2C::STATUS_TIMEOUT;
+            for (int attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+                if (attempt > 0) {
+                    // A timed-out write leaves the sector's crypto session uncertain; a re-auth
+                    // without a re-select desyncs (slice-0046), so re-select and re-auth the SAME
+                    // sector before retrying. authedSector is unchanged, so the sector's remaining
+                    // blocks keep writing under this freshly opened session.
+                    selectCard();
+                    if (!authBlock(dump, item.sector, item.addr)) {
+                        sectorAuthed = false;  // deterministic auth loss, not a transient write miss
+                        break;
+                    }
+                    delay(20);
+                }
+                status =
+                    (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Write(item.addr, buffer, MIFARE_BLOCK_SIZE);
+                if (status == MFRC522_I2C::STATUS_OK) break;
+                Serial.printf("[RFID] Write: block %d attempt %d/%d NAK (status %d)\n",
+                              item.addr, attempt + 1, WRITE_ATTEMPTS, status);
+            }
             if (status == MFRC522_I2C::STATUS_OK) {
                 result.blocksWritten++;
+            } else if (!sectorAuthed) {
+                result.failedAuth++;
+                Serial.printf("[RFID] Write: block %d lost sector %d auth on retry\n",
+                              item.addr, item.sector);
             } else {
                 result.failedWrite++;
-                Serial.printf("[RFID] Write: block %d NAK (status %d)\n", item.addr, status);
+                Serial.printf("[RFID] Write: block %d NAK after %d attempts (status %d)\n",
+                              item.addr, WRITE_ATTEMPTS, status);
             }
         }
         done++;
