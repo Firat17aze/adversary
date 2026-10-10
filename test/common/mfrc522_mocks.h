@@ -26,6 +26,30 @@ inline byte g_mockMfrcVersion = 0x92;
 // could not.
 inline bool g_mockMagicGen1a = false;
 
+// Probe-retry seam (slice-0044): if >0, MIFARE_OpenUidBackdoor returns false until its
+// g_mockMagicAckOnAttempt-th call, then true — modelling a flaky Gen1a backdoor that only ACKs
+// after a retry. 0 (default) keeps the plain g_mockMagicGen1a behaviour so other tests are
+// untouched. g_mockBackdoorCalls counts calls across the fresh `new MFRC522_I2C` a probe creates.
+inline int g_mockMagicAckOnAttempt = 0;
+inline int g_mockBackdoorCalls = 0;
+
+// --- RFID Write test seams (slice-0043) ---
+// A recording MIFARE_Write so test_rfid_writer can assert which blocks were written with which
+// bytes. Cleared by tests in setUp(). Free globals for the same reason as the verdict above.
+struct MockMifareWrite {
+    uint8_t addr;
+    uint8_t bytes[16];
+};
+inline std::vector<MockMifareWrite> g_mockWrites;
+
+// When true, MIFARE_Write to block 0 returns a NAK — models an ordinary card's locked
+// manufacturer block, so the UID-write fail-loud path is exercisable off-target.
+inline bool g_mockBlock0Nak = false;
+
+// When true, PCD_Authenticate rejects every key — models a sector whose keys are unknown to the
+// target, so the writer's failedAuth path is reachable despite the factory-FF fallback.
+inline bool g_mockAuthFails = false;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -98,12 +122,29 @@ public:
     // ordinary card does not. The real driver collapses "ordinary card" and
     // "bus fault" into a single false, which is faithful to model here -- the
     // caller's fail-loud handling lives in the post-probe re-select, not here.
-    bool MIFARE_OpenUidBackdoor(bool /*logErrors*/) { return g_mockMagicGen1a; }
+    bool MIFARE_OpenUidBackdoor(bool /*logErrors*/) {
+        g_mockBackdoorCalls++;
+        if (g_mockMagicAckOnAttempt > 0) return g_mockBackdoorCalls >= g_mockMagicAckOnAttempt;
+        return g_mockMagicGen1a;
+    }
 
     byte PCD_Authenticate(byte command, byte blockAddr, MIFARE_Key* key, Uid* uid) {
+        if (g_mockAuthFails) return STATUS_ERROR;
         if (key->keyByte[0] == 0xFF && key->keyByte[1] == 0xFF) return STATUS_OK;
         if (key->keyByte[0] == 0xA0 && key->keyByte[1] == 0xA1) return STATUS_OK;
         return STATUS_ERROR;
+    }
+
+    byte MIFARE_Write(byte blockAddr, byte* buffer, byte bufferSize) {
+        MockMifareWrite record;
+        record.addr = blockAddr;
+        memset(record.bytes, 0, sizeof(record.bytes));
+        if (buffer) {
+            memcpy(record.bytes, buffer, bufferSize < 16 ? bufferSize : 16);
+        }
+        g_mockWrites.push_back(record);
+        if (blockAddr == 0 && g_mockBlock0Nak) return STATUS_MIFARE_NACK;
+        return STATUS_OK;
     }
 
     enum PICC_Type : byte {

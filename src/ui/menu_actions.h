@@ -40,6 +40,7 @@ enum MenuActionId {
 
     // RFID submenu
     ACTION_RFID_DASHBOARD = 500,
+    ACTION_RFID_WRITE = 501,
 
     // Server Mode
     ACTION_SERVER = 600,

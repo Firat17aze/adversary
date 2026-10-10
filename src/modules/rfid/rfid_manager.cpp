@@ -175,7 +175,27 @@ bool RFIDManager::probeMagicGen1a() {
     // it rather than re-hand-roll the raw framing. It returns true only on a full
     // backdoor ACK; Gen2/CUID "direct write" magic is protocol-indistinguishable
     // here and is intentionally out of scope (see slice-0041).
-    bool isMagic = m_rfid->MIFARE_OpenUidBackdoor(false);
+    // The backdoor wake is timing-sensitive: the first transceive after HALT often misses, so a
+    // single attempt yields false negatives (observed in-field: the same Gen1a card read NO then
+    // YES). A YES is high-confidence (an ordinary card cannot ACK the non-standard frames), so we
+    // retry up to MAGIC_PROBE_ATTEMPTS, re-selecting the card to ACTIVE between tries, and report
+    // NO only after that many clean failures (slice-0044).
+    constexpr int MAGIC_PROBE_ATTEMPTS = 5;
+    bool isMagic = false;
+    for (int attempt = 0; attempt < MAGIC_PROBE_ATTEMPTS && !isMagic; attempt++) {
+        if (attempt > 0) {
+            // Re-select to ACTIVE so the retry starts from the same clean state a fresh
+            // detection would; if the card will not wake, try again rather than give up.
+            m_rfid->PICC_HaltA();
+            byte atqa[2];
+            byte atqaSize = sizeof(atqa);
+            if (m_rfid->PICC_WakeupA(atqa, &atqaSize) != MFRC522_I2C::STATUS_OK ||
+                !m_rfid->PICC_ReadCardSerial()) {
+                continue;
+            }
+        }
+        isMagic = m_rfid->MIFARE_OpenUidBackdoor(false);
+    }
     if (isMagic) {
         Serial.println("[RFID] Magic Gen1a backdoor ACK -> block 0 / UID is rewritable");
     }

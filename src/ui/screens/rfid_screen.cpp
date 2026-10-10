@@ -13,6 +13,15 @@ extern void adversary_ui_render_forced();
 
 namespace adversary {
 
+namespace {
+constexpr const char* RFID_CAPTURES_DIR = "/adversary/captures/RFID";
+// Rows the write-dump picker shows at once. Sized for its own layout (list starts just under the
+// status bar), not the taller audit-summary header getVisibleSummaryItems() assumes (slice-0043).
+constexpr int WRITE_PICK_VISIBLE_ROWS = 5;
+}
+
+bool RfidScreen::s_writeModeRequested = false;
+
 RfidScreen::RfidScreen()
     : m_manager(RFIDManager::getInstance())
     , m_active(false)
@@ -27,7 +36,14 @@ RfidScreen::RfidScreen()
     , m_auditStartMs(0)
     , m_detailsScroll(0)
     , m_promptSelection(0)
-    , m_readDataOption(false) {
+    , m_readDataOption(false)
+    , m_writeFileSelection(0)
+    , m_writeFileScroll(0)
+    , m_writeIncludeUid(false)
+    , m_writeFromMenu(false)
+    , m_writePromptSelection(0)
+    , m_writeProgressDone(0)
+    , m_writeProgressTotal(0) {
     memset(m_auditFilename, 0, sizeof(m_auditFilename));
 }
 
@@ -49,8 +65,16 @@ void RfidScreen::show() {
         {'\n', "Read", true}
     });
     footerHints_.setFocus(false);
-    
+
     Serial.println("[UI] RfidScreen visible");
+
+    // Launched via the "RFID Write" menu entry: open straight into the restore picker instead
+    // of the read dashboard (slice-0043). One-shot — cleared so a later plain open reads.
+    if (s_writeModeRequested) {
+        s_writeModeRequested = false;
+        m_writeFromMenu = true;   // ESC from the picker returns to the RFID submenu, not here.
+        enterWritePick();
+    }
 }
 
 void RfidScreen::hide() {
@@ -73,7 +97,8 @@ void RfidScreen::update() {
             footerHints_.setHints({
                 {'d', "Details", true},
                 {'a', "Audit", canAudit}, // canAudit determines if it's enabled/gray
-                {'s', "Save", true}
+                {'s', "Save", true},
+                {'w', "Write", true}
             });
         }
     }
@@ -142,6 +167,22 @@ void RfidScreen::render(Canvas& canvas) {
                 
             case State::DETAILS:
                 drawDetailsSubscreen(canvas);
+                break;
+
+            case State::WRITE_PICK:
+                drawWritePick(canvas);
+                break;
+
+            case State::WRITE_PROMPT:
+                drawWritePrompt(canvas);
+                break;
+
+            case State::WRITING:
+                drawWriting(canvas);
+                break;
+
+            case State::WRITE_SUMMARY:
+                drawWriteSummary(canvas);
                 break;
         }
     }
@@ -449,6 +490,20 @@ bool RfidScreen::handleInput(char key) {
                 {'s', "Save", true}
             });
             m_needsRedraw = true;
+        } else if (m_state == State::WRITE_PROMPT) {
+            // Back to the file picker.
+            enterWritePick();
+        } else if (m_state == State::WRITE_PICK || m_state == State::WRITE_SUMMARY) {
+            if (m_writeFromMenu) {
+                // Launched from the RFID submenu: ESC returns there, not to the read screen.
+                m_shouldExit = true;
+            } else {
+                m_state = State::IDLE;
+                footerHints_.setHints({
+                    {'\n', "Read", true}
+                });
+                m_needsRedraw = true;
+            }
         } else if (m_state == State::RESULT) {
             m_manager.clearTag();
             m_state = State::IDLE;
@@ -492,6 +547,80 @@ bool RfidScreen::handleInput(char key) {
             }
         } else {
             ToastManager::getInstance().show("Place tag first", ToastType::WARNING);
+        }
+        return true;
+    }
+
+    if (key == 'w' && (m_state == State::RESULT || m_state == State::IDLE)) {
+        m_writeFromMenu = false;  // Entered from the dashboard; ESC returns to the reader.
+        enterWritePick();
+        return true;
+    }
+
+    // WRITE_PICK: navigate the .nfc file list, Enter loads the chosen dump.
+    if (m_state == State::WRITE_PICK) {
+        switch (key) {
+            case ';':
+                if (m_writeFileSelection > 0) {
+                    m_writeFileSelection--;
+                    if (m_writeFileSelection < m_writeFileScroll) {
+                        m_writeFileScroll = m_writeFileSelection;
+                    }
+                    m_needsRedraw = true;
+                }
+                return true;
+            case '.':
+                if (m_writeFileSelection < (int)m_writeFiles.size() - 1) {
+                    m_writeFileSelection++;
+                    if (m_writeFileSelection >= m_writeFileScroll + WRITE_PICK_VISIBLE_ROWS) {
+                        m_writeFileScroll = m_writeFileSelection - WRITE_PICK_VISIBLE_ROWS + 1;
+                    }
+                    m_needsRedraw = true;
+                }
+                return true;
+            case '\n':
+                if (!m_writeFiles.empty() &&
+                    loadWriteDump(m_writeFiles[m_writeFileSelection])) {
+                    m_state = State::WRITE_PROMPT;
+                    m_writePromptSelection = 0;
+                    footerHints_.setHints({
+                        {';', "^", true}, {'.', "v", true},
+                        {'\n', "Select", true}, {'`', "Back", true}
+                    });
+                    m_needsRedraw = true;
+                }
+                return true;
+        }
+    }
+
+    // WRITE_PROMPT: toggle the UID opt-in, or start the restore.
+    if (m_state == State::WRITE_PROMPT) {
+        switch (key) {
+            case ';':
+                if (m_writePromptSelection > 0) { m_writePromptSelection--; m_needsRedraw = true; }
+                return true;
+            case '.':
+                if (m_writePromptSelection < 1) { m_writePromptSelection++; m_needsRedraw = true; }
+                return true;
+            case '\n':
+                if (m_writePromptSelection == 0) {
+                    m_writeIncludeUid = !m_writeIncludeUid;
+                    m_needsRedraw = true;
+                } else {
+                    startWrite();
+                }
+                return true;
+        }
+    }
+
+    // WRITE_SUMMARY: Done returns to wherever the flow was entered from.
+    if (m_state == State::WRITE_SUMMARY && key == '\n') {
+        if (m_writeFromMenu) {
+            m_shouldExit = true;
+        } else {
+            m_state = State::IDLE;
+            footerHints_.setHints({{'\n', "Read", true}});
+            m_needsRedraw = true;
         }
         return true;
     }
@@ -1083,6 +1212,305 @@ void RfidScreen::drawSectorDetail(Canvas& canvas) {
     } else {
         canvas.setTextColor(theme::ERROR());
         canvas.print("LOCKED");
+    }
+}
+
+// ---- Write / restore flow (slice-0043) ----
+
+void RfidScreen::enterWritePick() {
+    m_writeFiles.clear();
+    m_writeFileSelection = 0;
+    m_writeFileScroll = 0;
+
+    File dir = SD.open(RFID_CAPTURES_DIR);
+    if (dir && dir.isDirectory()) {
+        for (File entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+            std::string name = entry.name();
+            size_t slash = name.find_last_of('/');  // Some cores return a full path.
+            if (slash != std::string::npos) name = name.substr(slash + 1);
+            if (!entry.isDirectory() && name.size() > 4 &&
+                name.compare(name.size() - 4, 4, ".nfc") == 0) {
+                m_writeFiles.push_back(name);
+            }
+        }
+    }
+    if (dir) dir.close();
+
+    m_state = State::WRITE_PICK;
+    footerHints_.setHints({
+        {';', "^", true}, {'.', "v", true},
+        {'\n', "Select", true}, {'`', "Back", true}
+    });
+    m_needsRedraw = true;
+}
+
+bool RfidScreen::loadWriteDump(const std::string& filename) {
+    std::string path = std::string(RFID_CAPTURES_DIR) + "/" + filename;
+    File file = SD.open(path.c_str(), FILE_READ);
+    if (!file) {
+        ToastManager::getInstance().show("Open failed", ToastType::ERROR);
+        return false;
+    }
+    std::string text;
+    text.reserve(file.size());
+    uint8_t buffer[256];
+    while (file.available()) {
+        int read = file.read(buffer, sizeof(buffer));
+        if (read <= 0) break;
+        text.append(reinterpret_cast<char*>(buffer), read);
+    }
+    file.close();
+
+    m_writeDump = parseNfcDump(text);
+    if (!m_writeDump.valid) {
+        Serial.printf("[RFID] Write load: %s invalid (%u B): %s\n", filename.c_str(),
+                      (unsigned)text.size(), m_writeDump.parseError.c_str());
+        ToastManager::getInstance().show("Bad .nfc file", ToastType::ERROR);
+        return false;
+    }
+    m_writePlan = buildWritePlan(m_writeDump);
+    m_writeIncludeUid = false;
+    Serial.printf("[RFID] Write load: %s %u B, %u blocks, %u writable, uid=%d\n",
+                  filename.c_str(), (unsigned)text.size(),
+                  (unsigned)m_writeDump.blocks.size(),
+                  (unsigned)m_writePlan.dataWrites.size(), m_writePlan.hasManufacturer);
+    if (m_writePlan.dataWrites.empty() && !m_writePlan.hasManufacturer) {
+        // A keys-only dump (audited with Read Block Data off), or one whose blocks all read back
+        // as "??". Nothing to restore — report rather than write an empty card.
+        ToastManager::getInstance().show("No block data in dump", ToastType::WARNING);
+        return false;
+    }
+    return true;
+}
+
+void RfidScreen::startWrite() {
+    if (!m_manager.getReader()) {
+        ToastManager::getInstance().show("No reader", ToastType::ERROR);
+        return;
+    }
+
+    m_state = State::WRITING;
+    m_writeProgressDone = 0;
+    m_writeProgressTotal = static_cast<int>(m_writePlan.dataWrites.size()) +
+        (m_writeIncludeUid && m_writePlan.hasManufacturer ? 1 : 0);
+    footerHints_.clear();
+    m_needsRedraw = true;
+    adversary_ui_render_forced();  // Show the progress screen before the blocking restore.
+
+    RfidWriter writer(m_manager.getReader());
+    m_writeResult = writer.restore(m_writePlan, m_writeDump, m_writeIncludeUid,
+        [this](const WriteProgress& progress) {
+            m_writeProgressDone = progress.done;
+            m_writeProgressTotal = progress.total;
+            m_needsRedraw = true;
+            adversary_ui_render_forced();
+            delay(1);
+        });
+
+    m_state = State::WRITE_SUMMARY;
+    m_needsRedraw = true;
+
+    char msg[40];
+    snprintf(msg, sizeof(msg), "Wrote %d/%d blocks",
+             m_writeResult.blocksWritten, m_writeResult.totalPlanned);
+    ToastManager::getInstance().show(
+        msg, m_writeResult.blocksWritten > 0 ? ToastType::SUCCESS : ToastType::ERROR);
+    footerHints_.setHints({{'\n', "Done", true}, {'`', "Back", true}});
+}
+
+void RfidScreen::drawWritePick(Canvas& canvas) {
+    ui::StatusBar::render(canvas, "Restore Dump");
+
+    const int16_t x = 10;
+    const int16_t screenW = config::SCREEN_WIDTH;
+    canvas.setTextSize(1);
+
+    if (m_writeFiles.empty()) {
+        int16_t y = config::STATUS_BAR_HEIGHT + 8;
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(x, y);
+        canvas.print("No .nfc dumps found.");
+        y += 14;
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(x, y);
+        canvas.print("Audit a card with");
+        y += 12;
+        canvas.setCursor(x, y);
+        canvas.print("Read Block Data ON first.");
+        return;
+    }
+
+    // List starts right under the status bar; show WRITE_PICK_VISIBLE_ROWS at a time and scroll.
+    const int16_t listTop = config::STATUS_BAR_HEIGHT + 2;
+    const int total = static_cast<int>(m_writeFiles.size());
+    int endIndex = m_writeFileScroll + WRITE_PICK_VISIBLE_ROWS;
+    if (endIndex > total) endIndex = total;
+
+    for (int i = m_writeFileScroll; i < endIndex; i++) {
+        int16_t itemY = listTop + (i - m_writeFileScroll) * theme::LIST_ITEM_HEIGHT;
+        bool selected = (i == m_writeFileSelection);
+        if (selected) {
+            canvas.fillRect(0, itemY, screenW, theme::LIST_ITEM_HEIGHT, theme::BG_SECONDARY());
+            canvas.setTextColor(theme::ACCENT());
+        } else {
+            canvas.setTextColor(theme::TEXT_PRIMARY());
+        }
+        canvas.setCursor(x, itemY + 6);
+        canvas.print(m_writeFiles[i].c_str());
+    }
+
+    // Scroll arrows (mirroring scanner_screen): more dumps above / below the window.
+    if (m_writeFileScroll > 0) {
+        canvas.fillTriangle(screenW - 8, listTop + 4, screenW - 12, listTop + 10,
+                            screenW - 4, listTop + 10, theme::ACCENT());
+    }
+    if (endIndex < total) {
+        int16_t bottomY = config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - 4;
+        canvas.fillTriangle(screenW - 8, bottomY, screenW - 12, bottomY - 6,
+                            screenW - 4, bottomY - 6, theme::ACCENT());
+    }
+
+    char rightContent[8];
+    snprintf(rightContent, sizeof(rightContent), "%d/%d", m_writeFileSelection + 1, total);
+    footerHints_.setRightContent(rightContent);
+}
+
+void RfidScreen::drawWritePrompt(Canvas& canvas) {
+    ui::StatusBar::render(canvas, "Write Plan");
+
+    int16_t x = 8;
+    int16_t y = config::STATUS_BAR_HEIGHT + 8;
+    const int16_t rowH = 13;
+    int16_t screenW = config::SCREEN_WIDTH;
+
+    // Source UID (not selectable).
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.setCursor(x, y);
+    canvas.print("UID : ");
+    canvas.setTextColor(theme::SUCCESS());
+    canvas.print(m_writeDump.uid.c_str());
+    y += rowH;
+
+    // Plan summary.
+    canvas.setTextColor(theme::TEXT_PRIMARY());
+    canvas.setCursor(x, y);
+    canvas.printf("Data blocks : %d", (int)m_writePlan.dataWrites.size());
+    y += rowH;
+    canvas.setTextColor(theme::TEXT_DISABLED());
+    canvas.setCursor(x, y);
+    canvas.printf("Skipped: %d trailer, %d unread", m_writePlan.skippedTrailer,
+                  m_writePlan.skippedUnknown);
+    y += rowH + 2;
+
+    canvas.drawFastHLine(x, y, screenW - 16, theme::BG_SECONDARY());
+    y += 6;
+
+    // Option 0: UID (block 0) opt-in.
+    bool uidRowSelected = (m_writePromptSelection == 0);
+    if (uidRowSelected) {
+        canvas.fillRect(0, y - 1, screenW, rowH, theme::ACCENT());
+        canvas.setTextColor(theme::TEXT_PRIMARY());
+    } else {
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+    }
+    canvas.setCursor(x, y);
+    canvas.print("Write UID (magic):");
+    canvas.setCursor(screenW - 40, y);
+    if (m_writeIncludeUid) {
+        if (!uidRowSelected) canvas.setTextColor(theme::WARNING());
+        canvas.print("[ON]");
+    } else {
+        if (!uidRowSelected) canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.print("[OFF]");
+    }
+    y += rowH;
+    canvas.setTextColor(theme::TEXT_DISABLED());
+    canvas.setCursor(x + 6, y);
+    canvas.print("Block 0; fails on normal cards");
+    y += rowH + 4;
+
+    // Option 1: start.
+    bool startSelected = (m_writePromptSelection == 1);
+    if (startSelected) {
+        canvas.fillRect(0, y - 1, screenW, rowH, theme::SUCCESS());
+        canvas.setTextColor(theme::TEXT_PRIMARY());
+    } else {
+        canvas.setTextColor(theme::SUCCESS());
+    }
+    canvas.setCursor(x, y);
+    canvas.print(">> START WRITE <<");
+}
+
+void RfidScreen::drawWriting(Canvas& canvas) {
+    int centerX = config::SCREEN_WIDTH / 2;
+    int y = config::STATUS_BAR_HEIGHT + 20;
+
+    canvas.setTextColor(theme::ACCENT());
+    canvas.setTextSize(1);
+    const char* title = "WRITING TO CARD";
+    canvas.setCursor(centerX - (strlen(title) * 3), y);
+    canvas.print(title);
+    y += 20;
+
+    float progress = m_writeProgressTotal > 0
+                         ? (float)m_writeProgressDone / (float)m_writeProgressTotal
+                         : 0.0f;
+    int barW = 180;
+    int barH = 12;
+    int x = centerX - (barW / 2);
+    canvas.drawRoundRect(x, y, barW, barH, 2, theme::BG_SECONDARY());
+    canvas.fillRoundRect(x + 2, y + 2, (int)((barW - 4) * progress), barH - 4, 1,
+                         theme::SUCCESS());
+    y += barH + 10;
+
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.setCursor(centerX - 30, y);
+    canvas.printf("%d / %d", m_writeProgressDone, m_writeProgressTotal);
+}
+
+void RfidScreen::drawWriteSummary(Canvas& canvas) {
+    ui::StatusBar::render(canvas, "Write Result");
+
+    int16_t x = 10;
+    int16_t y = config::STATUS_BAR_HEIGHT + 10;
+    const int16_t rowH = 14;
+
+    if (!m_writeResult.cardSelected) {
+        canvas.setTextColor(theme::ERROR());
+        canvas.setCursor(x, y);
+        canvas.print("No card detected.");
+        return;
+    }
+
+    canvas.setTextColor(theme::SUCCESS());
+    canvas.setTextSize(1);
+    canvas.setCursor(x, y);
+    canvas.printf("Written: %d / %d", m_writeResult.blocksWritten, m_writeResult.totalPlanned);
+    y += rowH;
+
+    if (m_writeResult.failedAuth > 0 || m_writeResult.failedWrite > 0) {
+        canvas.setTextColor(theme::WARNING());
+        canvas.setCursor(x, y);
+        canvas.printf("Failed: %d auth, %d write", m_writeResult.failedAuth,
+                      m_writeResult.failedWrite);
+        y += rowH;
+    }
+
+    if (m_writeResult.uidAttempted) {
+        y += 4;
+        canvas.drawFastHLine(x, y, config::SCREEN_WIDTH - 20, theme::BG_SECONDARY());
+        y += 6;
+        canvas.setTextColor(m_writeResult.uidWritten ? theme::WARNING() : theme::TEXT_DISABLED());
+        // Wrap the verdict string across the narrow screen.
+        const std::string& line = m_writeResult.uidResult;
+        size_t pos = 0;
+        const size_t perLine = 30;
+        while (pos < line.size()) {
+            canvas.setCursor(x, y);
+            canvas.print(line.substr(pos, perLine).c_str());
+            pos += perLine;
+            y += 12;
+        }
     }
 }
 

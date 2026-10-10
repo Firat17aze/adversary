@@ -45,6 +45,7 @@
 #include "ui/menu_actions.h"    // MenuActionId (shared with menu_factory.cpp, slice-0024)
 #include "ui/menu_factory.h"    // buildRootMenuItems() / buildCarouselItems() (slice-0024)
 #include "ui/menu_routes.h"     // findMenuRoute() dispatch table (slice-0029)
+#include "ui/screens/rfid_screen.h"  // RfidScreen::requestWriteMode() launch intent (slice-0043)
 #include "ui/screens/radio_screen.h"
 #include "ui/screens/modules_screen.h"
 #include "core/module_detection.h"
@@ -776,6 +777,11 @@ void handleMenuAction(int actionId) {
     if (!route) {
         Serial.printf("[Main] Unknown action: %d\n", actionId);
         return;
+    }
+    // The RFID screen hosts both Read/Audit and Write; this one-shot intent tells show() to open
+    // straight into the write-restore flow instead of the read dashboard (slice-0043).
+    if (actionId == ACTION_RFID_WRITE) {
+        adversary::RfidScreen::requestWriteMode();
     }
     navigateToScreen(route->screen);
     if (route->transitions) {

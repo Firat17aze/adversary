@@ -13,6 +13,8 @@ void setUp() {
     RFIDManager::getInstance().resetForTest();
     g_mockMfrcVersion = 0x92;  // default: reader present, unless a test says otherwise
     g_mockMagicGen1a = false;  // default: ordinary card, unless a test says otherwise
+    g_mockMagicAckOnAttempt = 0;  // default: backdoor verdict is the plain g_mockMagicGen1a
+    g_mockBackdoorCalls = 0;
 }
 
 void tearDown() {
@@ -143,6 +145,22 @@ void test_rfid_manager_ordinary_card_is_not_magic() {
     TEST_ASSERT_FALSE(tag->isMagic);
 }
 
+// slice-0044: the backdoor wake is flaky, so a single-shot probe reports false negatives on a
+// real Gen1a card. With the backdoor ACKing only on the 2nd attempt, a single-shot probe would
+// report NO (fails before); the bounded retry recovers it to YES (passes after).
+void test_rfid_manager_magic_probe_retries_past_false_negative() {
+    RFIDManager& mgr = RFIDManager::getInstance();
+    g_mockMagicAckOnAttempt = 2;  // 1st backdoor attempt misses, 2nd ACKs
+    mgr.init();
+    mgr.activate();
+
+    mgr.update();
+
+    const RFIDTagInfo* tag = mgr.getLastTag();
+    TEST_ASSERT_NOT_NULL(tag);
+    TEST_ASSERT_TRUE(tag->isMagic);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_rfid_manager_initial_state);
@@ -154,5 +172,6 @@ int main() {
     RUN_TEST(test_rfid_redetect_sees_insertion);
     RUN_TEST(test_rfid_manager_detects_magic_gen1a);
     RUN_TEST(test_rfid_manager_ordinary_card_is_not_magic);
+    RUN_TEST(test_rfid_manager_magic_probe_retries_past_false_negative);
     return UNITY_END();
 }

@@ -70,7 +70,10 @@ std::vector<MenuItem> buildRootMenuItems() {
         // reboot or menu rebuild. This is the submenu-greying desync slice-0042 fixes.
         MenuItem::gated("RFID Dashboard", ACTION_RFID_DASHBOARD, 'd', "RFID (Module missing)",
                         []{ return adversary::ui::g_rfidDetected; }),
-        MenuItem::disabled("RFID Write (Coming Soon)"),
+        // RFID Write (slice-0043): restore a .nfc dump onto a card. Same live gate as the
+        // dashboard (needs the module); opens the RFID screen straight into its write flow.
+        MenuItem::gated("RFID Write", ACTION_RFID_WRITE, 'w', "RFID Write (Module missing)",
+                        []{ return adversary::ui::g_rfidDetected; }),
         MenuItem::separator(),
         MenuItem::back()
     };
