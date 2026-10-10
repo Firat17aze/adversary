@@ -217,8 +217,11 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
         if (onProgress) onProgress({done, result.totalPlanned, 0});
     }
 
-    Serial.printf("[RFID] Write done: %d/%d written, %d auth-fail, %d write-fail. %s\n",
-                  result.blocksWritten, result.totalPlanned, result.failedAuth,
+    // Report the data-block tally against the data-block denominator only: totalPlanned folds in the
+    // +1 UID step, so pairing it with blocksWritten (data-only) read as an off-by-one (47/48) on a
+    // full clone. The UID outcome is a separate concern and is carried by uidResult, not this count.
+    Serial.printf("[RFID] Write done: %d/%d data blocks, %d auth-fail, %d write-fail. %s\n",
+                  result.blocksWritten, static_cast<int>(plan.dataWrites.size()), result.failedAuth,
                   result.failedWrite, result.uidResult.c_str());
     return result;
 }
