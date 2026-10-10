@@ -779,7 +779,13 @@ void RfidScreen::drawDetailsSubscreen(Canvas& canvas) {
     
     // Type
     drawRow("TYPE : ", tag->type.c_str(), theme::TEXT_PRIMARY());
-    
+
+    // Magic (Gen1a backdoor) — the single most useful fact for a clone workflow:
+    // YES means block 0 / the UID is rewritable. Drawn in the warning accent so a
+    // cloneable card is obvious at a glance.
+    drawRow("MAGIC: ", tag->isMagic ? "YES (Gen1a)" : "NO",
+            tag->isMagic ? theme::WARNING() : theme::TEXT_DISABLED());
+
     virtualY += 6;
     
     // Tag-specific info
@@ -874,7 +880,7 @@ int RfidScreen::getDetailsContentHeight() const {
     if (!tag) return 0;
     
     // Estimate content lines based on tag type
-    int lines = 6;  // Base: title, separator, UID, SAK, TYPE, separator
+    int lines = 7;  // Base: title, separator, UID, SAK, TYPE, MAGIC, separator
     
     if (tag->sak & 0x20) {
         lines += 3;  // ISO header, ATS

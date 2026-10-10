@@ -12,6 +12,7 @@ using namespace adversary;
 void setUp() {
     RFIDManager::getInstance().resetForTest();
     g_mockMfrcVersion = 0x92;  // default: reader present, unless a test says otherwise
+    g_mockMagicGen1a = false;  // default: ordinary card, unless a test says otherwise
 }
 
 void tearDown() {
@@ -110,6 +111,38 @@ void test_rfid_redetect_sees_insertion() {
     TEST_ASSERT_TRUE(mgr.isDetected());
 }
 
+// slice-0041: isMagic must be driven by the Gen1a backdoor probe, not the dead
+// `= false` stub it replaced. The magic-true case FAILS before the slice (the
+// stub could never report magic) and PASSES after; the false case guards the
+// ordinary-card verdict and that the probe is non-destructive enough for the
+// tag to still read on the same update() call.
+
+void test_rfid_manager_detects_magic_gen1a() {
+    RFIDManager& mgr = RFIDManager::getInstance();
+    g_mockMagicGen1a = true;  // card answers the backdoor sequence
+    mgr.init();
+    mgr.activate();
+
+    mgr.update();
+
+    const RFIDTagInfo* tag = mgr.getLastTag();
+    TEST_ASSERT_NOT_NULL(tag);
+    TEST_ASSERT_TRUE(tag->isMagic);
+}
+
+void test_rfid_manager_ordinary_card_is_not_magic() {
+    RFIDManager& mgr = RFIDManager::getInstance();
+    g_mockMagicGen1a = false;  // ordinary card: no backdoor ACK
+    mgr.init();
+    mgr.activate();
+
+    mgr.update();
+
+    const RFIDTagInfo* tag = mgr.getLastTag();
+    TEST_ASSERT_NOT_NULL(tag);
+    TEST_ASSERT_FALSE(tag->isMagic);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_rfid_manager_initial_state);
@@ -119,5 +152,7 @@ int main() {
     RUN_TEST(test_rfid_manager_clear_tag);
     RUN_TEST(test_rfid_redetect_sees_removal);
     RUN_TEST(test_rfid_redetect_sees_insertion);
+    RUN_TEST(test_rfid_manager_detects_magic_gen1a);
+    RUN_TEST(test_rfid_manager_ordinary_card_is_not_magic);
     return UNITY_END();
 }

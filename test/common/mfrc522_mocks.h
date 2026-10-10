@@ -19,6 +19,13 @@ typedef uint8_t byte;
 // `new MFRC522_I2C`, which a per-instance value could not survive (slice-0018).
 inline byte g_mockMfrcVersion = 0x92;
 
+// Settable Gen1a-backdoor verdict so tests can simulate a magic card (true) or
+// an ordinary one (false, the default so existing RFID tests are untouched).
+// Mirrors the g_mockMfrcVersion seam: a free global survives the fresh
+// `new MFRC522_I2C` a redetect()/re-open creates, which a per-instance field
+// could not.
+inline bool g_mockMagicGen1a = false;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -85,6 +92,13 @@ public:
     
     byte PICC_WakeupA(byte* bufferATQA, byte* bufferSize) { return STATUS_OK; }
     byte PICC_RequestA(byte* bufferATQA, byte* bufferSize) { return STATUS_OK; }
+    byte PICC_Select(Uid* uid, byte validBits = 0) { return STATUS_OK; }
+
+    // Gen1a backdoor probe: a real magic card ACKs the 0x40/0x43 sequence; an
+    // ordinary card does not. The real driver collapses "ordinary card" and
+    // "bus fault" into a single false, which is faithful to model here -- the
+    // caller's fail-loud handling lives in the post-probe re-select, not here.
+    bool MIFARE_OpenUidBackdoor(bool /*logErrors*/) { return g_mockMagicGen1a; }
 
     byte PCD_Authenticate(byte command, byte blockAddr, MIFARE_Key* key, Uid* uid) {
         if (key->keyByte[0] == 0xFF && key->keyByte[1] == 0xFF) return STATUS_OK;

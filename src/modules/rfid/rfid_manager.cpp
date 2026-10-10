@@ -138,26 +138,63 @@ void RFIDManager::update() {
         }
     }
     
-    // Check for Magic Card Gen1 (UID changeable via backdoor)
-    m_lastTag.isMagic = false; 
+    // Magic-card (Gen1a UID backdoor) detection. The probe HALTs and re-selects
+    // the tag, so it is relatively slow and churns card state -- run it once per
+    // newly-seen UID (the same edge that gates the notify), not on every 200ms
+    // poll of a card that is just sitting on the reader. The verdict persists in
+    // m_lastTag for the Details view until the card is cleared.
+    bool isNewUid = (m_lastTag.uid != m_lastNotifiedUid);
+    if (isNewUid) {
+        m_lastTag.isMagic = probeMagicGen1a();
+    }
 
-    Serial.printf("[RFID] Tag Detected: %s (%s, SAK: 0x%02X)\n", 
-                  m_lastTag.uid.c_str(), m_lastTag.type.c_str(), m_lastTag.sak);
+    Serial.printf("[RFID] Tag Detected: %s (%s, SAK: 0x%02X, MAGIC: %s)\n",
+                  m_lastTag.uid.c_str(), m_lastTag.type.c_str(), m_lastTag.sak,
+                  m_lastTag.isMagic ? "YES" : "NO");
     m_hasTag = true;
 
     // Notify ONLY if it's a new UID detect
-    if (m_lastTag.uid != m_lastNotifiedUid) {
+    if (isNewUid) {
         // Publish EventBus event for semantic notification
         EventData event(EventType::RFID_TAG_DETECTED);
         // Include partial UID in network SSID field for identification in notification router if needed
-        strncpy(event.payload.network.ssid, m_lastTag.uid.c_str(), 32); 
+        strncpy(event.payload.network.ssid, m_lastTag.uid.c_str(), 32);
         EventBus::getInstance().publish(event);
-        
+
         m_lastNotifiedUid = m_lastTag.uid;
     }
 
     // We do NOT Halt here anymore, to keep the tag ACTIVE for immediate auditing.
     // m_rfid->PICC_HaltA();
+}
+
+bool RFIDManager::probeMagicGen1a() {
+    // Gen1a "magic" cards answer a non-standard backdoor wake (HALT, then a 7-bit
+    // 0x40 and a 0x43, each ACKed with a 4-bit 0x0A) that genuine NXP silicon
+    // ignores. The driver already implements that exact wire sequence, so reuse
+    // it rather than re-hand-roll the raw framing. It returns true only on a full
+    // backdoor ACK; Gen2/CUID "direct write" magic is protocol-indistinguishable
+    // here and is intentionally out of scope (see slice-0041).
+    bool isMagic = m_rfid->MIFARE_OpenUidBackdoor(false);
+    if (isMagic) {
+        Serial.println("[RFID] Magic Gen1a backdoor ACK -> block 0 / UID is rewritable");
+    }
+
+    // MIFARE_OpenUidBackdoor() begins with HALTA, so the tag is left halted
+    // whether or not it was magic. Re-select it so the tag stays live for an
+    // immediate audit (the invariant the "keep the tag ACTIVE" note below relies
+    // on). A tag that does not come back is a real bus/tag fault, not a plain
+    // "not magic" result -- surface it rather than letting a degraded reader
+    // silently report every card as non-magic (fail loud). A normal card's
+    // silence to the backdoor frames is the expected negative and is NOT a fault.
+    m_rfid->PICC_HaltA();
+    byte bufferATQA[2];
+    byte bufferSize = sizeof(bufferATQA);
+    if (m_rfid->PICC_WakeupA(bufferATQA, &bufferSize) != MFRC522_I2C::STATUS_OK ||
+        m_rfid->PICC_Select(&m_rfid->uid, 0) != MFRC522_I2C::STATUS_OK) {
+        Serial.println("[RFID] Magic probe: tag did not re-select cleanly; bus/tag state suspect");
+    }
+    return isMagic;
 }
 
 const RFIDTagInfo* RFIDManager::getLastTag() const {

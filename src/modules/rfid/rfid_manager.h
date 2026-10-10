@@ -104,6 +104,17 @@ private:
     RFIDManager(const RFIDManager&) = delete;
     RFIDManager& operator=(const RFIDManager&) = delete;
 
+    /**
+     * @brief Probe the just-selected tag for the Gen1a UID-rewrite backdoor.
+     *
+     * Gen1a "magic" cards answer a non-standard backdoor wake that genuine
+     * silicon ignores; a positive means block 0 (the UID) is rewritable. The
+     * probe HALTs and then re-selects the tag, so it is non-destructive to the
+     * normal read/audit path. Call once per newly-seen UID (it is relatively
+     * slow and churns card state). Returns true only on a full backdoor ACK.
+     */
+    bool probeMagicGen1a();
+
     MFRC522_I2C* m_rfid;
     RFIDTagInfo m_lastTag;
     std::string m_lastNotifiedUid;
