@@ -33,18 +33,29 @@ enum class MenuItemType : uint8_t {
  * @brief Single menu item
  */
 struct MenuItem {
-    std::string label;              ///< Display text
+    std::string label;              ///< Display text (when enabled)
     std::string icon;               ///< Optional icon (emoji or char)
     MenuItemType type;              ///< Item type
     char shortcut;                  ///< Keyboard shortcut (0 = none)
     int actionId;                   ///< Action ID for callbacks
     std::shared_ptr<std::vector<MenuItem>> submenuPtr;  ///< Submenu items (if type == SUBMENU)
-    
+    /// Live availability gate (slice-0042), mirroring CarouselItem::enabledFn: when set it is
+    /// consulted every frame so a hardware/SD-gated entry reflects the current detection state
+    /// (after a Modules Re-scan / SD mount) instead of a boot-frozen type. Unset = not gated.
+    std::function<bool()> enabledFn;
+    std::string disabledLabel;      ///< Reason-bearing label shown greyed when the gate is off
+
     MenuItem() : type(MenuItemType::ACTION), shortcut(0), actionId(0) {}
-    
+
     MenuItem(const std::string& lbl, MenuItemType t, int id = 0, char key = 0, const std::string& ico = "")
         : label(lbl), icon(ico), type(t), shortcut(key), actionId(id) {}
-    
+
+    /// True when the item is currently available. A live gate wins; otherwise a static
+    /// ITEM_DISABLED is the only unavailable kind, so ungated items are unchanged.
+    bool isEnabled() const {
+        return enabledFn ? enabledFn() : type != MenuItemType::ITEM_DISABLED;
+    }
+
     // Get submenu (returns empty vector if none)
     const std::vector<MenuItem>& submenu() const {
         static const std::vector<MenuItem> empty;
@@ -76,6 +87,18 @@ struct MenuItem {
     // Helper for creating disabled item
     static MenuItem disabled(const std::string& label) {
         return MenuItem(label, MenuItemType::ITEM_DISABLED);
+    }
+
+    // Helper for a live-gated action item (slice-0042). Selectable and shown as `label`
+    // while `enabledFn()` holds; otherwise greyed and unselectable, shown as `disabledLabel`
+    // (the reason, e.g. "RFID (Module missing)"). Re-evaluated every frame, so a peripheral
+    // attached after boot un-greys the entry without a menu rebuild.
+    static MenuItem gated(const std::string& label, int actionId, char shortcut,
+                          const std::string& disabledLabel, std::function<bool()> enabledFn) {
+        MenuItem item(label, MenuItemType::ACTION, actionId, shortcut);
+        item.disabledLabel = disabledLabel;
+        item.enabledFn = std::move(enabledFn);
+        return item;
     }
 };
 
@@ -243,21 +266,25 @@ void Menu::render(Canvas& canvas) {
             continue;
         }
         
-        // Highlight selected item
+        // Highlight selected item. "Disabled" is now the live isEnabled() verdict, not just
+        // the static ITEM_DISABLED type, so a gated-off entry greys itself (slice-0042).
+        const bool enabled = item.isEnabled();
         if (static_cast<int>(i) == selection_) {
             canvas.fillRect(0, yPos - 5, config::SCREEN_WIDTH, 18, theme::ACCENT());
             canvas.setTextColor(theme::BG_PRIMARY());
-        } else if (item.type == MenuItemType::ITEM_DISABLED) {
+        } else if (!enabled) {
             canvas.setTextColor(theme::TEXT_DISABLED());
         } else {
             canvas.setTextColor(theme::TEXT_PRIMARY());
         }
-        
+
         canvas.setTextSize(1);
         canvas.setCursor(10, yPos);
-        
-        // Just display the label - no numbering
-        canvas.print(item.label.c_str());
+
+        // A gated-off entry shows its reason-bearing label (e.g. "RFID (Module missing)").
+        const std::string& shownLabel = (!enabled && !item.disabledLabel.empty())
+                                            ? item.disabledLabel : item.label;
+        canvas.print(shownLabel.c_str());
         
         // Submenu indicator
         if (item.type == MenuItemType::SUBMENU) {

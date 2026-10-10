@@ -12,8 +12,6 @@ std::vector<MenuItem> buildRootMenuItems() {
     using adversary::MenuItem;
     using adversary::MenuItemType;
 
-    auto& sdManager = adversary::SDManager::getInstance();
-
     // Wireless submenu (Back last: entry lands the cursor on a real action, and
     // with wrap-around nav Back is one Up-press away from the top)
     std::vector<MenuItem> wirelessMenu = {
@@ -28,16 +26,17 @@ std::vector<MenuItem> buildRootMenuItems() {
         MenuItem::action("Evil Twin AP", ACTION_EVIL_TWIN, 'e'),
         MenuItem::action("Karma AP", ACTION_KARMA_AP, 'k'),
 
-        adversary::ui::g_gpsDetected ?
-            MenuItem::action("Wardriving", ACTION_WARDRIVING, 'd') :
-            MenuItem::disabled("Wardriving (No GPS)"),
+        // Live-gated (slice-0042): a GPS attached after boot un-greys Wardriving on the next
+        // frame after a Modules Re-scan refreshes g_gpsDetected, with no menu rebuild.
+        MenuItem::gated("Wardriving", ACTION_WARDRIVING, 'd', "Wardriving (No GPS)",
+                        []{ return adversary::ui::g_gpsDetected; }),
         MenuItem::separator(),
-        // Captures is a pure browser over SD capture files — nothing to show
-        // without a card, so grey it out (slice-0021). Un-greys on the next menu
-        // rebuild, which the Settings > Retry SD Mount handler triggers.
-        sdManager.isReady() ?
-            MenuItem::action("Captures", ACTION_CAPTURES, 'c') :
-            MenuItem::disabled("Captures (No SD)"),
+        // Captures is a pure browser over SD capture files — nothing to show without a card,
+        // so gate it on the cached isReady() bool live (slice-0042): mounting a card (boot or
+        // Retry SD Mount) un-greys it on the next frame. Safe to poll per-frame because
+        // isReady() is a flag read, not SD I/O (unlike the SERVER tile's fileExists gate).
+        MenuItem::gated("Captures", ACTION_CAPTURES, 'c', "Captures (No SD)",
+                        []{ return adversary::SDManager::getInstance().isReady(); }),
         MenuItem::action("Whitelist", ACTION_WHITELIST, 'l'),
         MenuItem::separator(),
         MenuItem::back()
@@ -47,11 +46,10 @@ std::vector<MenuItem> buildRootMenuItems() {
     std::vector<MenuItem> bleMenu = {
         MenuItem::action("BLE Scanner", ACTION_BLE_SCAN, 's'),
         MenuItem::action("Apple Attack", ACTION_BLE_APPLE_ATTACK, 'a'),
-        // BadBLE has no built-in scripts — it only runs SD .txt scripts, so it is
-        // useless without a card (slice-0021). Un-greys on the next menu rebuild.
-        sdManager.isReady() ?
-            MenuItem::action("BadBLE (HID)", ACTION_BLE_BAD_BLE, 'h') :
-            MenuItem::disabled("BadBLE (No SD)"),
+        // BadBLE has no built-in scripts — it only runs SD .txt scripts, so it is useless
+        // without a card (slice-0021). Live-gated on the cached isReady() bool (slice-0042).
+        MenuItem::gated("BadBLE (HID)", ACTION_BLE_BAD_BLE, 'h', "BadBLE (No SD)",
+                        []{ return adversary::SDManager::getInstance().isReady(); }),
         MenuItem::action("Identity Spoof", ACTION_BLE_SPOOF, 'i'),
         MenuItem::action("BLE Spam", ACTION_BLE_SPAM, 'p'),
         MenuItem::separator(),
@@ -67,9 +65,11 @@ std::vector<MenuItem> buildRootMenuItems() {
 
     // RFID submenu
     std::vector<MenuItem> rfidMenu = {
-        adversary::ui::g_rfidDetected ?
-            MenuItem::action("RFID Dashboard", ACTION_RFID_DASHBOARD, 'd') :
-            MenuItem::disabled("RFID (Module missing)"),
+        // Live-gated (slice-0042): an RFID module hot-inserted and picked up by the Modules
+        // Re-scan un-greys this on the next frame, matching the carousel RFID tile, with no
+        // reboot or menu rebuild. This is the submenu-greying desync slice-0042 fixes.
+        MenuItem::gated("RFID Dashboard", ACTION_RFID_DASHBOARD, 'd', "RFID (Module missing)",
+                        []{ return adversary::ui::g_rfidDetected; }),
         MenuItem::disabled("RFID Write (Coming Soon)"),
         MenuItem::separator(),
         MenuItem::back()

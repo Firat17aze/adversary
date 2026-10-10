@@ -136,7 +136,9 @@ void Menu::selectCurrent() {
     
     switch (item.type) {
         case MenuItemType::ACTION:
-            if (callback_) {
+            // A module unplugged while the cursor rests on its entry greys it live; refuse to
+            // dispatch an action the UI is showing as unavailable (slice-0042, fail loud).
+            if (callback_ && item.isEnabled()) {
                 callback_(item.actionId);
             }
             break;
@@ -214,9 +216,13 @@ void Menu::ensureValidSelection() {
 }
 
 bool Menu::isSelectable(const MenuItem& item) const {
-    return item.type == MenuItemType::ACTION || 
-           item.type == MenuItemType::SUBMENU ||
-           item.type == MenuItemType::BACK;
+    // A live-gated entry (slice-0042) is selectable only while its gate holds, so nav,
+    // ensureValidSelection, and the shortcut lookups all skip it exactly as a static
+    // ITEM_DISABLED item. isEnabled() is true for every ungated non-disabled item.
+    return (item.type == MenuItemType::ACTION ||
+            item.type == MenuItemType::SUBMENU ||
+            item.type == MenuItemType::BACK) &&
+           item.isEnabled();
 }
 
 int Menu::findNextSelectable(int from, int direction) {
