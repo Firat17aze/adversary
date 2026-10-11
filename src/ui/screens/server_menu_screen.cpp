@@ -10,6 +10,7 @@
 
 #ifdef ESP32
 #include <Arduino.h>
+#include "utils/log.h"
 #endif
 
 // Canvas management for server mode (free 64KB for network operations)
@@ -60,7 +61,7 @@ void ServerMenuScreen::show() {
     footerHints_.setFocus(false);
     
 #ifdef ESP32
-    Serial.println("[ServerMenu] Screen shown");
+    LOG_D("SERVERMENU", "Screen shown");
 #endif
 }
 

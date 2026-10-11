@@ -22,6 +22,7 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <IRutils.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -168,7 +169,7 @@ void IrRecordScreen::performCapture() {
         char summary[MESSAGE_BUF];
         describeSignal(sig, summary, sizeof(summary));
 #ifdef ESP32
-        Serial.printf("[IR] Captured %s\n", summary);
+        LOG_I("IR", "Captured %s", summary);
 #endif
         pendingSignal_ = sig;
         // Show the pulse-strip preview first so the operator can judge the
@@ -176,7 +177,7 @@ void IrRecordScreen::performCapture() {
         state_ = MenuState::CAPTURE_REVIEW;
     } else {
 #ifdef ESP32
-        Serial.println("[IR] No frame captured (RX window timed out)");
+        LOG_W("IR", "No frame captured (RX window timed out)");
 #endif
         showErrorToast("Capture failed, retry closer");
         state_ = MenuState::MAIN;

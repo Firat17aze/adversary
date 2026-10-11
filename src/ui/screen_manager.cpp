@@ -6,6 +6,10 @@
 #include "screen_manager.h"
 #include "components/toast_manager.h"
 
+#ifdef ESP32
+#include "utils/log.h"
+#endif
+
 // Canvas type comes from screen_manager.h -> screen_interface.h -> canvas_types.h
 
 namespace adversary {
@@ -19,7 +23,7 @@ void ScreenManager::registerScreen(ScreenId id, IScreen* screen) {
     if (screen) {
         screens_[id] = screen;
 #ifdef ESP32
-        Serial.printf("[ScreenManager] Registered screen: %s\n", screen->getName());
+        LOG_D("SCREEN", "Registered screen: %s", screen->getName());
 #endif
     }
 }
@@ -36,7 +40,7 @@ IScreen* ScreenManager::getScreen(ScreenId id) {
 void ScreenManager::registerFactory(ScreenId id, ScreenFactory factory) {
     factories_[id] = factory;
 #ifdef ESP32
-    Serial.printf("[ScreenManager] Registered factory for screen id: %d\n", static_cast<int>(id));
+    LOG_D("SCREEN", "Registered factory for screen id: %d", static_cast<int>(id));
 #endif
 }
 
@@ -74,7 +78,7 @@ bool ScreenManager::setActiveScreen(ScreenId id, bool suppressShow) {
             activeScreen_->show();
         }
 #ifdef ESP32
-        Serial.printf("[ScreenManager] Factory-created: %s%s\n",
+        LOG_D("SCREEN", "Factory-created: %s%s",
             activeScreen_->getName(), suppressShow ? " (show deferred)" : " (showing)");
 #endif
         return true;
@@ -84,7 +88,7 @@ bool ScreenManager::setActiveScreen(ScreenId id, bool suppressShow) {
     auto it = screens_.find(id);
     if (it == screens_.end()) {
 #ifdef ESP32
-        Serial.printf("[ScreenManager] Screen not found: %d\n", static_cast<int>(id));
+        LOG_W("SCREEN", "Screen not found: %d", static_cast<int>(id));
 #endif
         return false;
     }
@@ -106,7 +110,7 @@ bool ScreenManager::setActiveScreen(ScreenId id, bool suppressShow) {
     }
     
 #ifdef ESP32
-    Serial.printf("[ScreenManager] Switched to: %s\n", activeScreen_->getName());
+    LOG_D("SCREEN", "Switched to: %s", activeScreen_->getName());
 #endif
 
     return true;

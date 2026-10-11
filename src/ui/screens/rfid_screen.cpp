@@ -7,6 +7,7 @@
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
+#include "utils/log.h"
 #include <SD.h>
 
 extern void adversary_ui_render_forced();
@@ -66,7 +67,7 @@ void RfidScreen::show() {
     });
     footerHints_.setFocus(false);
 
-    Serial.println("[UI] RfidScreen visible");
+    LOG_D("RFID", "RfidScreen visible");
 
     // Launched via the "RFID Write" menu entry: open straight into the restore picker instead
     // of the read dashboard (slice-0043). One-shot — cleared so a later plain open reads.
@@ -1268,17 +1269,17 @@ bool RfidScreen::loadWriteDump(const std::string& filename) {
 
     m_writeDump = parseNfcDump(text);
     if (!m_writeDump.valid) {
-        Serial.printf("[RFID] Write load: %s invalid (%u B): %s\n", filename.c_str(),
-                      (unsigned)text.size(), m_writeDump.parseError.c_str());
+        LOG_W("RFID", "Write load: %s invalid (%u B): %s", filename.c_str(),
+              (unsigned)text.size(), m_writeDump.parseError.c_str());
         ToastManager::getInstance().show("Bad .nfc file", ToastType::ERROR);
         return false;
     }
     m_writePlan = buildWritePlan(m_writeDump);
     m_writeIncludeUid = false;
-    Serial.printf("[RFID] Write load: %s %u B, %u blocks, %u writable, uid=%d\n",
-                  filename.c_str(), (unsigned)text.size(),
-                  (unsigned)m_writeDump.blocks.size(),
-                  (unsigned)m_writePlan.dataWrites.size(), m_writePlan.hasManufacturer);
+    LOG_D("RFID", "Write load: %s %u B, %u blocks, %u writable, uid=%d",
+          filename.c_str(), (unsigned)text.size(),
+          (unsigned)m_writeDump.blocks.size(),
+          (unsigned)m_writePlan.dataWrites.size(), m_writePlan.hasManufacturer);
     if (m_writePlan.dataWrites.empty() && !m_writePlan.hasManufacturer) {
         // A keys-only dump (audited with Read Block Data off), or one whose blocks all read back
         // as "??". Nothing to restore — report rather than write an empty card.

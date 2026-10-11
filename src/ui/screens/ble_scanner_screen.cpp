@@ -13,6 +13,7 @@
 #include "ui/screens/ble_apple_attack_screen.h"
 #include "ui/screens/ble_spoof_screen.h"
 #include "ui/screen_manager.h"
+#include "utils/log.h"
 #include <algorithm>
 
 namespace adversary {
@@ -57,7 +58,7 @@ void BleScannerScreen::show() {
     m_isInitializing = true;
     m_pendingInit = 2; // Countdown: 2 -> 1 (render) -> 0 (init)
     
-    Serial.println("[UI] BleScannerScreen visible, pending init...");
+    LOG_D("BLESCAN", "visible, pending init...");
 }
 
 void BleScannerScreen::hide() {
@@ -75,7 +76,7 @@ void BleScannerScreen::hide() {
     // Lazy restore system state (WiFi, etc.) after BLE session
     SystemManager::getInstance().restoreFromMemoryIntensiveTask();
 
-    Serial.println("[UI] BleScannerScreen hidden");
+    LOG_D("BLESCAN", "hidden");
 }
 
 void BleScannerScreen::update() {

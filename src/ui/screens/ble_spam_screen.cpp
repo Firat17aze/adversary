@@ -12,6 +12,7 @@
 #include "modules/wifi/wifi_scanner.h"
 #include "assets/generated_icons.h"
 #include "utils/bitmap_remapper.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -269,13 +270,13 @@ bool BleSpamScreen::handleInput(char key) {
 }
 
 void BleSpamScreen::startAttack() {
-    Serial.println("[UI] BleSpamScreen::startAttack() called");
+    LOG_D("BLESPAM", "startAttack() called");
     // 1. Prepare memory
     SystemManager::getInstance().prepareForMemoryIntensiveTask(false); // Don't purge canvas
     
     m_state = State::ATTACK;
     m_pulseStartTime = millis();
-    Serial.println("[UI] Starting BLESpanner...");
+    LOG_I("BLESPAM", "Starting BLESpanner...");
     BLESpanner::getInstance().start(m_config);
     
     footerHints_.setHints({

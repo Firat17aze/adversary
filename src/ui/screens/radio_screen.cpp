@@ -22,6 +22,7 @@
 #ifdef ESP32
 #include <Arduino.h>
 #include <SD.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -320,11 +321,16 @@ void RadioScreen::performCapture() {
         // transmitter these are the ambient noise-floor edges; a real remote gives
         // a longer, regular ~100-1000 us train.
         const size_t sample = sig.durationsUs.size() < 6 ? sig.durationsUs.size() : 6;
-        Serial.printf("[Radio] Captured %u edges on %s; first:",
-                      static_cast<unsigned>(sig.durationsUs.size()),
-                      PRESETS[presetIndex_].label);
-        for (size_t i = 0; i < sample; ++i) Serial.printf(" %uus", sig.durationsUs[i]);
-        Serial.println();
+        char edgeList[64];
+        int off = 0;
+        for (size_t i = 0; i < sample; ++i) {
+            off += snprintf(edgeList + off, sizeof(edgeList) - off, " %uus",
+                            sig.durationsUs[i]);
+            if (off >= static_cast<int>(sizeof(edgeList))) break;
+        }
+        LOG_D("RADIO", "Captured %u edges on %s; first:%s",
+              static_cast<unsigned>(sig.durationsUs.size()),
+              PRESETS[presetIndex_].label, edgeList);
 #endif
         pendingSignal_ = sig;
         // Show the pulse-strip preview first so the operator can judge the
@@ -332,7 +338,7 @@ void RadioScreen::performCapture() {
         state_ = MenuState::CAPTURE_REVIEW;
     } else {
 #ifdef ESP32
-        Serial.println("[Radio] No signal captured (RX window timed out)");
+        LOG_W("RADIO", "No signal captured (RX window timed out)");
 #endif
         showErrorToast("No signal captured");
         state_ = MenuState::MAIN;

@@ -13,6 +13,7 @@
 #include <Arduino.h>
 
 #include "ui/screen_manager.h"
+#include "utils/log.h"
 
 #include "ui/screens/scanner_screen.h"
 #include "ui/screens/sniffer_screen.h"
@@ -103,7 +104,7 @@ void registerAllScreens(ScreenManager& manager) {
         []() -> IScreen* {
             auto* s = new SettingsScreen();
             s->setOnSavedNetworksRequested([]() {
-                Serial.println("[Settings] Navigating to Saved Networks");
+                LOG_D("SCREEN", "Navigating to Saved Networks");
                 ScreenManager::getInstance().setActiveScreen(ScreenId::SAVED_NETWORKS);
             });
             return s;
@@ -119,7 +120,7 @@ void registerAllScreens(ScreenManager& manager) {
     manager.registerFactory(ScreenId::SERVER_STATUS,
         []() -> IScreen* { return new ServerStatusScreen(); });
 
-    Serial.println("[Init] All screens registered with adversary::ScreenManager");
+    LOG_I("SCREEN", "All screens registered with adversary::ScreenManager");
 }
 
 } // namespace adversary

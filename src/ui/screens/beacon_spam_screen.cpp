@@ -7,6 +7,7 @@
 
 #ifdef ESP32
 #include <Arduino.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -47,7 +48,7 @@ void BeaconSpamScreen::init() {
     if (initialized_) return;
     
 #ifdef ESP32
-    Serial.println("[BeaconSpamScreen] Initialized");
+    LOG_D("BEACON", "Initialized");
 #endif
     
     initialized_ = true;
@@ -100,7 +101,7 @@ void BeaconSpamScreen::show() {
     }
     
 #ifdef ESP32
-    Serial.println("[BeaconSpamScreen] Shown");
+    LOG_D("BEACON", "Shown");
 #endif
 }
 
@@ -121,7 +122,7 @@ void BeaconSpamScreen::hide() {
     visible_ = false;
     
 #ifdef ESP32
-    Serial.println("[BeaconSpamScreen] Hidden");
+    LOG_D("BEACON", "Hidden");
 #endif
 }
 
@@ -636,7 +637,7 @@ void BeaconSpamScreen::startAttack() {
         needsRedraw_ = true;
         
 #ifdef ESP32
-        Serial.println("[BeaconSpamScreen] Attack started");
+        LOG_I("BEACON", "Attack started");
 #endif
     }
 }
@@ -646,7 +647,7 @@ void BeaconSpamScreen::stopAttack() {
     bs.stop();
     
 #ifdef ESP32
-    Serial.println("[BeaconSpamScreen] Attack stopped");
+    LOG_I("BEACON", "Attack stopped");
 #endif
 }
 

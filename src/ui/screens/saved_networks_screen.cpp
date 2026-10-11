@@ -4,6 +4,7 @@
  */
 
 #include "saved_networks_screen.h"
+#include "utils/log.h"
 #include <cstdio>
 #include <algorithm>
 
@@ -188,12 +189,12 @@ void SavedNetworksScreen::handleAction(char action) {
     switch (action) {
         case 'C':
         case 'c':
-            Serial.printf("[SavedNetworks] Connecting to %s...\n", selectedCred_.ssid);
+            LOG_I("SAVEDNET", "Connecting to %s...", selectedCred_.ssid);
             WiFiConnection::getInstance().connect(selectedCred_.ssid, selectedCred_.password);
             break;
         case 'F':
         case 'f':
-            Serial.printf("[SavedNetworks] Forgetting %s\n", selectedCred_.ssid);
+            LOG_I("SAVEDNET", "Forgetting %s", selectedCred_.ssid);
             SettingsManager::getInstance().removeWiFiCredential(selectedIndex_);
             SettingsManager::getInstance().save();
             if (selectedIndex_ >= (int)SettingsManager::getInstance().getSavedCredentials().size() && selectedIndex_ > 0) {
