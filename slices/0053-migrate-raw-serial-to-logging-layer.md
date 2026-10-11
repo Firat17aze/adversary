@@ -204,3 +204,14 @@ SD tee) requires physical hardware not available in this environment. The SD-tee
 unchanged from slice-0052, which device-verified it; this slice only re-routed call sites
 through it. Left as the one open on-device confirmation before the release-strip (the separate
 deferred `ADV_LOG_LEVEL` item) is banked.
+
+**Update — on-device verified (2026-10-11, Cardputer ADV).** The deviation above is now closed
+for the gate half. The INFO build (`-e cardputer`) was flashed to a real Cardputer ADV
+(`board_M5CardputerADV` autodetected) and a fresh boot captured over USB-CDC serial: **27
+`[INFO] TAG:` lines** in log.h's exact format appeared across init — `INIT` (incl. `SD Card:
+SDHC, 14836.20 MB free`), `SDMGR`, `BOOT`, `SETTINGS`, `CAPREG`, `TIME`, `CAP`, `MODULES`,
+`GPS`, `RFID`, `SCREEN`, through `INIT: Initialization complete` — spanning tags from every
+migration wave. (The ESP-IDF core's own `[I]/[E]/[W]` lines, from `CORE_DEBUG_LEVEL=3`, are a
+separate unchanged knob.) The only piece still not re-exercised this session is a *forced*
+`LOG_E` writing `/adversary/logs/error.log`: deterministically forcing one on-device is awkward
+and the tee is the slice-0052-verified, unchanged path, so it was not re-run.

@@ -168,3 +168,11 @@ that a WARN release image prints no INFO lines while a forced failure still writ
 `/adversary/logs/error.log` needs hardware unavailable in this environment. The SD-tee path is
 unchanged from slice-0052 (device-verified there); this slice only changed which level compiles
 in. Left as the lone open on-device confirmation.
+
+**Update — on-device verified (2026-10-11, Cardputer ADV).** The strip was confirmed on real
+hardware. The release build (`-e cardputer_release`, WARN) was flashed to a Cardputer ADV and a
+fresh boot captured over USB-CDC: **zero `[INFO] TAG:` lines** through SD-mount/module-detect
+time (~3.9 s), where the INFO build (flashed and captured in the same session) emitted **27** of
+them. Same board, same boot path — so the absence is the strip, not a missed window. A forced
+`LOG_E`→`/adversary/logs/error.log` was not re-run (awkward to force deterministically on-device;
+WARN ≥ ERROR so `LOG_E` still compiles in, and the tee is the unchanged slice-0052-verified path).
