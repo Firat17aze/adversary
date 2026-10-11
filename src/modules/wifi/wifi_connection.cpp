@@ -5,6 +5,7 @@
 
 #include "wifi_connection.h"
 #include "modules/storage/settings_manager.h"
+#include "utils/log.h"
 #include <cstdio>
 
 #ifdef ESP32
@@ -28,7 +29,7 @@ bool WiFiConnection::connect(const char* ssid, const char* password,
                               uint8_t channel, bool save) {
     if (!ssid || strlen(ssid) == 0) {
 #ifdef ESP32
-        Serial.println("[WiFiConnection] Error: Empty SSID");
+        LOG_W("WIFICONN", "Error: Empty SSID");
 #endif
         return false;
     }
@@ -48,7 +49,7 @@ bool WiFiConnection::connect(const char* ssid, const char* password,
     saveOnConnect_ = save;
     
 #ifdef ESP32
-    Serial.printf("[WiFiConnection] Connecting to %s...\n", ssid_);
+    LOG_I("WIFICONN", "Connecting to %s...", ssid_);
 
     // CRITICAL FIX: Ensure clean state before connecting
     // 1. Disable promiscuous mode (leftover from attacks/sniffer)
@@ -94,7 +95,7 @@ bool WiFiConnection::connect(const char* ssid, const char* password,
 
 void WiFiConnection::disconnect() {
 #ifdef ESP32
-    Serial.println("[WiFiConnection] Disconnecting...");
+    LOG_I("WIFICONN", "Disconnecting...");
     
     // Use disconnect(true) with a safety check to avoid ESP_ERR_WIFI_NOT_INIT
     if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -136,7 +137,7 @@ void WiFiConnection::update() {
     if (state_ != ConnectionState::CONNECTING) {
         // Check for unexpected disconnection
         if (state_ == ConnectionState::CONNECTED && !WiFi.isConnected()) {
-            Serial.println("[WiFiConnection] Connection lost");
+            LOG_W("WIFICONN", "Connection lost");
             setState(ConnectionState::DISCONNECTED);
         }
         return;
@@ -144,8 +145,8 @@ void WiFiConnection::update() {
     
     // Check if connected
     if (WiFi.isConnected()) {
-        Serial.printf("[WiFiConnection] Connected! IP: %s\n", 
-                      WiFi.localIP().toString().c_str());
+        LOG_I("WIFICONN", "Connected! IP: %s",
+              WiFi.localIP().toString().c_str());
         setState(ConnectionState::CONNECTED);
         
         // Save credentials if requested
@@ -158,7 +159,7 @@ void WiFiConnection::update() {
     // Check for timeout
     uint32_t elapsed = millis() - connectStartTime_;
     if (elapsed >= CONNECT_TIMEOUT_MS) {
-        Serial.println("[WiFiConnection] Connection timeout");
+        LOG_W("WIFICONN", "Connection timeout");
         WiFi.disconnect(true);
         setState(ConnectionState::TIMEOUT);
         return;
@@ -167,7 +168,7 @@ void WiFiConnection::update() {
     // Check for failure (status gives more info)
     wl_status_t status = WiFi.status();
     if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
-        Serial.printf("[WiFiConnection] Connection failed: %d\n", status);
+        LOG_W("WIFICONN", "Connection failed: %d", status);
         WiFi.disconnect(true);
         setState(ConnectionState::FAILED);
     }
@@ -181,9 +182,9 @@ void WiFiConnection::setState(ConnectionState newState) {
     state_ = newState;
     
 #ifdef ESP32
-    Serial.printf("[WiFiConnection] State: %s -> %s\n",
-                  getConnectionStateName(oldState),
-                  getConnectionStateName(newState));
+    LOG_D("WIFICONN", "State: %s -> %s",
+          getConnectionStateName(oldState),
+          getConnectionStateName(newState));
     
     // Show toast notification based on state
     char toastMsg[64];
@@ -228,7 +229,7 @@ void WiFiConnection::saveCredentials() {
     settings.addWiFiCredential(ssid_, password_);
     settings.save();
 #ifdef ESP32
-    Serial.printf("[WiFiConnection] Credentials saved for %s\n", ssid_);
+    LOG_I("WIFICONN", "Credentials saved for %s", ssid_);
 #endif
 }
 
@@ -241,7 +242,7 @@ void WiFiConnection::forgetCredentials() {
     settings.clearWiFiCredentials();
     settings.save();
 #ifdef ESP32
-    Serial.println("[WiFiConnection] All saved credentials cleared");
+    LOG_I("WIFICONN", "All saved credentials cleared");
 #endif
 }
 
@@ -278,13 +279,13 @@ void WiFiConnection::autoConnect() {
     auto& settings = SettingsManager::getInstance();
     const auto& creds = settings.getSavedCredentials();
     if (creds.empty()) {
-        Serial.println("[WiFiConnection] No saved credentials for auto-connect");
+        LOG_I("WIFICONN", "No saved credentials for auto-connect");
         return;
     }
     
     // Auto-connect to the last successful network
     const auto& last = creds.back();
-    Serial.printf("[WiFiConnection] Auto-connecting to %s\n", last.ssid);
+    LOG_I("WIFICONN", "Auto-connecting to %s", last.ssid);
     connect(last.ssid, last.password, 0, false);  // Don't re-save
 #endif
 }

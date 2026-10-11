@@ -5,6 +5,7 @@
 
 #include "station_scanner.h"
 #include "../../utils/wifi_utils.h"
+#include "utils/log.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -53,7 +54,7 @@ bool StationScanner::start(uint8_t channel, uint32_t durationMs) {
     startTime_ = millis();
     duration_ = durationMs;
     
-    Serial.printf("[StationScanner] Started on channel %d for %lums\n", channel, durationMs);
+    LOG_I("STATION", "Started on channel %d for %lums", channel, durationMs);
     return true;
 #else
     (void)channel;
@@ -74,8 +75,8 @@ bool StationScanner::startForAP(const uint8_t* bssid, uint8_t channel, uint32_t 
     filterByBssid_ = true;
     memcpy(targetBssid_, bssid, 6);
     
-    Serial.printf("[StationScanner] Filtering for AP %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+    LOG_I("STATION", "Filtering for AP %02X:%02X:%02X:%02X:%02X:%02X",
+          bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
     
     return true;
 #else
@@ -94,7 +95,7 @@ void StationScanner::stop() {
     scanning_ = false;
     s_instance_ = nullptr;
     
-    Serial.printf("[StationScanner] Stopped. Found %zu stations\n", results_.count);
+    LOG_I("STATION", "Stopped. Found %zu stations", results_.count);
 #endif
 }
 
@@ -177,9 +178,9 @@ void StationScanner::processFrame(const uint8_t* data, uint16_t len, int8_t rssi
     bool isNew = results_.addOrUpdate(clientMac, bssid, rssi);
     
     if (isNew) {
-        Serial.printf("[StationScanner] New client: %02X:%02X:%02X:%02X:%02X:%02X (RSSI:%d)\n",
-                      clientMac[0], clientMac[1], clientMac[2],
-                      clientMac[3], clientMac[4], clientMac[5], rssi);
+        LOG_D("STATION", "New client: %02X:%02X:%02X:%02X:%02X:%02X (RSSI:%d)",
+              clientMac[0], clientMac[1], clientMac[2],
+              clientMac[3], clientMac[4], clientMac[5], rssi);
     }
 #else
     (void)data;

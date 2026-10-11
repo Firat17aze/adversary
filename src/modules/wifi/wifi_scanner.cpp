@@ -6,6 +6,7 @@
 #include "wifi_scanner.h"
 #include "core/event_bus.h"
 #include "config/config.h"
+#include "utils/log.h"
 
 #ifndef UNIT_TEST
 #include <WiFi.h>
@@ -77,7 +78,7 @@ bool WiFiScanner::init() {
         return true;
     }
     
-    Serial.println("[WiFiScanner] Initializing...");
+    LOG_I("WIFISCAN", "Initializing...");
     
     // Preserve existing connection if present
     bool wasConnected = WiFi.isConnected();
@@ -85,7 +86,7 @@ bool WiFiScanner::init() {
     String savedPass;
     
     if (wasConnected) {
-        Serial.println("[WiFiScanner] Preserving existing connection");
+        LOG_I("WIFISCAN", "Preserving existing connection");
         // WiFi is already in STA mode and connected - don't disconnect
     } else {
         // Set WiFi mode to station for scanning
@@ -114,7 +115,7 @@ bool WiFiScanner::init() {
     m_initialized = true;
     m_state = ScannerState::IDLE;
     
-    Serial.println("[WiFiScanner] Ready (CH1-14, 300ms min/ch)");
+    LOG_I("WIFISCAN", "Ready (CH1-14, 300ms min/ch)");
     return true;
 }
 
@@ -128,17 +129,17 @@ void WiFiScanner::deinit() {
     m_initialized = false;
     m_state = ScannerState::IDLE;
     
-    Serial.println("[WiFiScanner] Deinitialized");
+    LOG_I("WIFISCAN", "Deinitialized");
 }
 
 bool WiFiScanner::startScan() {
     if (!m_initialized) {
-        Serial.println("[WiFiScanner] Error: Not initialized");
+        LOG_W("WIFISCAN", "Error: Not initialized");
         return false;
     }
     
     if (m_state == ScannerState::SCANNING) {
-        Serial.println("[WiFiScanner] Scan already in progress");
+        LOG_W("WIFISCAN", "Scan already in progress");
         return false;
     }
     
@@ -164,11 +165,11 @@ bool WiFiScanner::startScan() {
     
     if (result == WIFI_SCAN_RUNNING) {
         m_state = ScannerState::SCANNING;
-        Serial.println("[WiFiScanner] Scan started (passive, 300ms/ch)");
+        LOG_I("WIFISCAN", "Scan started (passive, 300ms/ch)");
         return true;
     } else if (result == WIFI_SCAN_FAILED) {
         m_state = ScannerState::ERROR;
-        Serial.println("[WiFiScanner] Scan failed to start");
+        LOG_E("WIFISCAN", "Scan failed to start");
         return false;
     }
     
@@ -185,14 +186,14 @@ bool WiFiScanner::scanSync(uint32_t timeoutMs) {
     m_scanStartTime = millis();
     m_state = ScannerState::SCANNING;
     
-    Serial.println("[WiFiScanner] Starting synchronous scan...");
+    LOG_I("WIFISCAN", "Starting synchronous scan...");
     
     // Synchronous scan with hidden networks
     int16_t count = WiFi.scanNetworks(false, true);  // async=false, show_hidden=true
     
     if (count < 0) {
         m_state = ScannerState::ERROR;
-        Serial.printf("[WiFiScanner] Scan failed: %d\n", count);
+        LOG_E("WIFISCAN", "Scan failed: %d", count);
         return false;
     }
     
@@ -204,7 +205,7 @@ void WiFiScanner::stopScan() {
     if (m_state == ScannerState::SCANNING) {
         WiFi.scanDelete();
         m_state = ScannerState::IDLE;
-        Serial.println("[WiFiScanner] Scan stopped");
+        LOG_I("WIFISCAN", "Scan stopped");
     }
 }
 
@@ -224,7 +225,7 @@ void WiFiScanner::update() {
             // EventBus event published in processResults
         } else if (result == WIFI_SCAN_FAILED) {
             m_state = ScannerState::ERROR;
-            Serial.println("[WiFiScanner] Scan failed");
+            LOG_E("WIFISCAN", "Scan failed");
         }
         // WIFI_SCAN_RUNNING means still scanning
     }
@@ -279,8 +280,8 @@ void WiFiScanner::processResults() {
     m_lastScanTime = millis();
     m_state = ScannerState::COMPLETED;
     
-    Serial.printf("[WiFiScanner] Found %d networks in %lu ms\n", 
-                  count, m_lastScanTime - m_scanStartTime);
+    LOG_I("WIFISCAN", "Found %d networks in %lu ms",
+          count, m_lastScanTime - m_scanStartTime);
                   
     // Publish scan completion event
     adversary::EventData event(adversary::EventType::WIFI_SCAN_COMPLETED);
