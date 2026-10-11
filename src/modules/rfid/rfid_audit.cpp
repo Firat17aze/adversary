@@ -4,6 +4,7 @@
  */
 
 #include "rfid_audit.h"
+#include "rfid_reselect.h"
 #include <SD.h>
 
 namespace adversary {
@@ -195,32 +196,8 @@ int RfidAudit::runDictionaryAttack(
         }
     }
     
-    // Critical: Wake up the card from any potential HALT/SILENT state
-    bool selected = false;
-    for (int retry = 0; retry < 5; retry++) {
-        m_rfid->PCD_StopCrypto1();
-        m_rfid->PICC_HaltA(); // Force tag to a known state (HALT)
-        delay(20);
-        
-        byte bufferATQA[2];
-        byte bufferSize = sizeof(bufferATQA);
-        
-        // Try WUPA (to wake from HALT)
-        MFRC522_I2C::StatusCode status = (MFRC522_I2C::StatusCode)m_rfid->PICC_WakeupA(bufferATQA, &bufferSize);
-        
-        if (status != MFRC522_I2C::STATUS_OK) {
-            // Fallback: Try REQA (to wake from IDLE if it wasn't halted properly)
-            status = (MFRC522_I2C::StatusCode)m_rfid->PICC_RequestA(bufferATQA, &bufferSize);
-        }
-        
-        if (status == MFRC522_I2C::STATUS_OK || status == MFRC522_I2C::STATUS_COLLISION) {
-            if (m_rfid->PICC_ReadCardSerial()) {
-                selected = true;
-                break;
-            }
-        }
-        delay(30 * (retry + 1));
-    }
+    // Wake the card from any potential HALT/SILENT state into a selected one (slice-0049).
+    bool selected = reselectCard(m_rfid);
 
     if (!selected) {
         Serial.println("[RFID] Audit Error: Card not responding to WUPA");
@@ -239,16 +216,11 @@ int RfidAudit::runDictionaryAttack(
         
         uint8_t firstBlock = s * 4;
         
-        // CRITICAL: Re-select card at start of each sector (except sector 0) to reset state
-        // After a successful auth, the card stays in authenticated state for that sector.
-        // We must wake it up fresh before trying a new sector.
-        // Skip for sector 0 since we just did the initial wake-up before the loop.
+        // Re-select at the start of each sector (except sector 0, just selected above): the previous
+        // sector's auth left the tag ACTIVE, and an ACTIVE tag ignores a bare WUPA, so route through
+        // the HALT-first helper rather than waking inline (slice-0049; the bug slice-0046 fixed).
         if (s > 0) {
-            m_rfid->PCD_StopCrypto1();
-            byte bufferATQA[2];
-            byte bufferSize = sizeof(bufferATQA);
-            m_rfid->PICC_WakeupA(bufferATQA, &bufferSize);
-            m_rfid->PICC_ReadCardSerial();
+            reselectCard(m_rfid);
         }
         
         // Try Key A
@@ -336,22 +308,12 @@ int RfidAudit::runDictionaryAttack(
             memcpy(mfKey.keyByte, readKey, 6);
 
             // One PCD_Authenticate authenticates the WHOLE sector: re-select the card for a clean
-            // state (the dictionary left it mid-handshake), authenticate once against the first
-            // block, then read all four blocks under that single crypto session. Re-authenticating
-            // per block -- as this did -- issues a second auth with no re-select in between, which
-            // the WS1850S NAKs, so blocks 2-4 of every sector came back '??' (slice-0046).
-            //
-            // HALT before WUPA: the dictionary leaves the tag ACTIVE, and an ACTIVE tag ignores
-            // WUPA, so a bare WakeupA here left the tag unselected and the auth timed out
-            // (status 4, field-observed on 23FF9C1E). Halting first lets WUPA wake it cleanly,
-            // matching the initial select and the writer's selectCard().
-            m_rfid->PCD_StopCrypto1();
-            m_rfid->PICC_HaltA();
-            delay(20);
-            byte readATQA[2];
-            byte readATQASize = sizeof(readATQA);
-            m_rfid->PICC_WakeupA(readATQA, &readATQASize);
-            m_rfid->PICC_ReadCardSerial();
+            // state (the dictionary left it mid-handshake, and ACTIVE), authenticate once against the
+            // first block, then read all four blocks under that single crypto session. Re-selecting
+            // through the HALT-first helper matters here: a bare WUPA on the ACTIVE tag left it
+            // unselected and the auth timed out (slice-0046), and re-authenticating per block issues a
+            // second auth with no re-select, which the WS1850S NAKs -> blocks 2-4 came back '??'.
+            reselectCard(m_rfid);
 
             MFRC522_I2C::StatusCode authStatus = (MFRC522_I2C::StatusCode)m_rfid->PCD_Authenticate(
                 useKeyA ? MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_A : MFRC522_I2C::PICC_CMD_MF_AUTH_KEY_B,

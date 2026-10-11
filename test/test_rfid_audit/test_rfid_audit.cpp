@@ -26,6 +26,8 @@ void setUp() {
     g_mockReadFails = false;
     g_mockReauthNeedsReselect = false;
     g_mockSelectedSinceAuth = true;
+    g_mockWupaNeedsHalt = false;
+    g_mockTagState = MOCK_TAG_ACTIVE;
     SD.remove(kDiagDumpPath);
 }
 
@@ -164,6 +166,30 @@ void test_audit_reads_all_blocks_under_single_auth() {
     TEST_ASSERT_TRUE(dump.find("??") == std::string::npos);        // every block read back
 }
 
+// slice-0049: every full-select site must HALT before WUPA. A tag left ACTIVE by the previous
+// sector's auth ignores a bare WUPA, so a per-sector re-select that skips PICC_HaltA never wakes the
+// tag and the sector's auth fails (composed here with the slice-0046 re-auth desync, which turns an
+// unwoken tag into that auth failure). An all-factory-key card then cracks Key A in every sector
+// only if the per-sector re-select halts first. Fails before routing that re-select through
+// reselectCard (only sector 0's Key A is found -> keysFound == 1); passes after (16).
+//
+// The count is 16, not the clean-mock 32: Key B recovery leans on tryKey's lightweight per-failure
+// WUPA, which slice-0049 deliberately leaves un-helpered (it runs hundreds of times per audit), so
+// it stays defeated under this seam. That is fine -- this test pins the per-sector full-select, not
+// Key B discovery.
+void test_audit_reselect_halts_before_wupa_between_sectors() {
+    MFRC522_I2C rfid(0x28, -1);
+    RfidAudit audit(&rfid);
+
+    g_mockReauthNeedsReselect = true;  // the real re-auth desync (slice-0046)
+    g_mockWupaNeedsHalt = true;        // an ACTIVE tag ignores a bare WUPA (slice-0049)
+    g_mockTagState = MOCK_TAG_ACTIVE;  // a card that has been sitting in the field, left ACTIVE
+
+    int keysFound = audit.runDictionaryAttack([](const AuditProgressInfo&){});
+
+    TEST_ASSERT_EQUAL(16, keysFound);  // all 16 sectors' Key A cracked -> every re-select woke the tag
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_audit_dictionary_attack);
@@ -172,5 +198,6 @@ int main() {
     RUN_TEST(test_audit_reports_block_read_failure);
     RUN_TEST(test_audit_reports_no_key_sector_omitted);
     RUN_TEST(test_audit_reads_all_blocks_under_single_auth);
+    RUN_TEST(test_audit_reselect_halts_before_wupa_between_sectors);
     return UNITY_END();
 }

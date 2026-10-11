@@ -4,6 +4,7 @@
  */
 
 #include "rfid_writer.h"
+#include "rfid_reselect.h"
 
 #include <cstring>
 
@@ -31,26 +32,7 @@ constexpr int BACKDOOR_OPEN_ATTEMPTS = 5;
 RfidWriter::RfidWriter(MFRC522_I2C* rfid) : m_rfid(rfid) {}
 
 bool RfidWriter::selectCard() {
-    if (!m_rfid) return false;
-    for (int retry = 0; retry < 5; retry++) {
-        m_rfid->PCD_StopCrypto1();
-        m_rfid->PICC_HaltA();
-        delay(20);
-
-        byte bufferATQA[2];
-        byte bufferSize = sizeof(bufferATQA);
-        MFRC522_I2C::StatusCode status =
-            (MFRC522_I2C::StatusCode)m_rfid->PICC_WakeupA(bufferATQA, &bufferSize);
-        if (status != MFRC522_I2C::STATUS_OK) {
-            status = (MFRC522_I2C::StatusCode)m_rfid->PICC_RequestA(bufferATQA, &bufferSize);
-        }
-        if ((status == MFRC522_I2C::STATUS_OK || status == MFRC522_I2C::STATUS_COLLISION) &&
-            m_rfid->PICC_ReadCardSerial()) {
-            return true;
-        }
-        delay(30 * (retry + 1));
-    }
-    return false;
+    return reselectCard(m_rfid);  // the one shared full-select (slice-0049)
 }
 
 bool RfidWriter::tryAuth(uint8_t command, uint8_t blockAddr, const uint8_t* key) {

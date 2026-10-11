@@ -76,6 +76,17 @@ inline int g_mockWriteFailFirstN = 0;
 // ordinary card (g_mockMagicGen1a false) never ACKs the backdoor, so the flag never goes true.
 inline bool g_mockBackdoorOpen = false;
 
+// WUPA-needs-HALT model (slice-0049): on a WS1850S/clone a tag left ACTIVE by a prior auth ignores
+// WUPA (0x52) until it is HALTed, so a re-select that skips PICC_HaltA never wakes it. When this is
+// on, the mock tracks a three-state tag: a completed select or a successful auth leaves it ACTIVE;
+// WUPA/RequestA wake only a HALTED tag (an ACTIVE one times out); ReadCardSerial selects only a
+// woken (READY) tag. This composes with g_mockReauthNeedsReselect — an unwoken tag keeps
+// g_mockSelectedSinceAuth false, so the next auth fails, which is the observable no-key symptom. Off
+// by default, so every other test keeps the legacy always-wake behaviour.
+enum MockTagState { MOCK_TAG_ACTIVE, MOCK_TAG_HALTED, MOCK_TAG_READY };
+inline bool g_mockWupaNeedsHalt = false;
+inline MockTagState g_mockTagState = MOCK_TAG_ACTIVE;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -136,13 +147,35 @@ public:
     void PCD_AntennaOn() {}
     void PCD_AntennaOff() {}
     bool PICC_IsNewCardPresent() { return true; }
-    bool PICC_ReadCardSerial() { g_mockSelectedSinceAuth = true; return true; }
-    void PICC_HaltA() { g_mockBackdoorOpen = false; }  // halting closes the Gen1a backdoor (slice-0048)
+    bool PICC_ReadCardSerial() {
+        // Anticollision+select only works on a woken (READY) tag; an un-woken ACTIVE/HALTED tag has
+        // nothing to select (slice-0049). Legacy path (seam off) always selects.
+        if (g_mockWupaNeedsHalt && g_mockTagState != MOCK_TAG_READY) return false;
+        g_mockTagState = MOCK_TAG_ACTIVE;
+        g_mockSelectedSinceAuth = true;
+        return true;
+    }
+    void PICC_HaltA() {
+        g_mockBackdoorOpen = false;        // halting closes the Gen1a backdoor (slice-0048)
+        g_mockTagState = MOCK_TAG_HALTED;  // ...and lets the next WUPA wake it (slice-0049)
+    }
     void PCD_StopCrypto1() {}  // intentionally does NOT re-select: StopCrypto1 alone cannot clear
                                // the desync the real card exhibits (slice-0046).
 
-    byte PICC_WakeupA(byte* bufferATQA, byte* bufferSize) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
-    byte PICC_RequestA(byte* bufferATQA, byte* bufferSize) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
+    byte PICC_WakeupA(byte* bufferATQA, byte* bufferSize) {
+        // An ACTIVE/READY tag ignores WUPA; only a HALTED tag answers it (slice-0049). Legacy path
+        // (seam off) always wakes.
+        if (g_mockWupaNeedsHalt && g_mockTagState != MOCK_TAG_HALTED) return STATUS_TIMEOUT;
+        g_mockTagState = MOCK_TAG_READY;
+        g_mockSelectedSinceAuth = true;
+        return STATUS_OK;
+    }
+    byte PICC_RequestA(byte* bufferATQA, byte* bufferSize) {
+        if (g_mockWupaNeedsHalt && g_mockTagState != MOCK_TAG_HALTED) return STATUS_TIMEOUT;
+        g_mockTagState = MOCK_TAG_READY;
+        g_mockSelectedSinceAuth = true;
+        return STATUS_OK;
+    }
     byte PICC_Select(Uid* uid, byte validBits = 0) { g_mockSelectedSinceAuth = true; return STATUS_OK; }
 
     // Gen1a backdoor probe: a real magic card ACKs the 0x40/0x43 sequence; an
@@ -164,7 +197,8 @@ public:
         bool keyOk = (key->keyByte[0] == 0xFF && key->keyByte[1] == 0xFF) ||
                      (key->keyByte[0] == 0xA0 && key->keyByte[1] == 0xA1);
         if (!keyOk) return STATUS_ERROR;
-        g_mockSelectedSinceAuth = false;  // a successful auth consumes the selection
+        g_mockSelectedSinceAuth = false;   // a successful auth consumes the selection
+        g_mockTagState = MOCK_TAG_ACTIVE;  // ...and leaves the tag ACTIVE, ignoring the next bare WUPA
         return STATUS_OK;
     }
 
