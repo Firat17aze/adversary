@@ -1,5 +1,4 @@
 [
-  "src/core/event_bus.cpp",
   "src/hal/expansion/cc1101.cpp",
   "src/hal/expansion/expansion_cap.cpp",
   "src/hal/expansion/nrf24.cpp",
@@ -7,8 +6,6 @@
   "src/hal/storage/littlefs_backend.h",
   "src/hal/storage/sd_manager.cpp",
   "src/main.cpp",
-  "src/modules/system/system_manager.cpp",
-  "src/modules/system/time_manager.cpp",
   "src/ui/screen_manager.cpp",
   "src/ui/screen_registry.cpp",
   "src/ui/screens/beacon_spam_screen.cpp",

@@ -8,6 +8,7 @@
 
 #ifdef ESP32
 #include <Arduino.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -199,8 +200,8 @@ EventBus::HandlerId EventBus::subscribe(EventType type, Handler handler) {
     
 #ifdef ESP32
     if (debugLogging_) {
-        Serial.printf("[EventBus] Subscribed id=%u to %s (bucket %zu)\n", 
-                      id, eventTypeToString(type), bucket);
+        LOG_D("EVENTBUS", "Subscribed id=%u to %s (bucket %zu)",
+              id, eventTypeToString(type), bucket);
     }
 #endif
     
@@ -231,7 +232,7 @@ bool EventBus::unsubscribe(HandlerId id) {
             
 #ifdef ESP32
             if (debugLogging_) {
-                Serial.printf("[EventBus] Unsubscribed id=%u\n", id);
+                LOG_D("EVENTBUS", "Unsubscribed id=%u", id);
             }
 #endif
             return true;
@@ -278,8 +279,8 @@ bool EventBus::queue(const EventData& event) {
     
 #ifdef ESP32
     if (debugLogging_ && success) {
-        Serial.printf("[EventBus] Queued %s (queue size: %zu)\n", 
-                      eventTypeToString(event.type), eventQueue_.size());
+        LOG_D("EVENTBUS", "Queued %s (queue size: %zu)",
+              eventTypeToString(event.type), eventQueue_.size());
     }
 #endif
     

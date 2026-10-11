@@ -26,6 +26,8 @@
 #include <core/event_data.h>
 #endif
 
+#include "utils/log.h"
+
 namespace adversary {
 
 TimeManager& TimeManager::getInstance() {
@@ -46,7 +48,7 @@ TimeManager::TimeManager()
 }
 
 bool TimeManager::syncFromNTP(const char* server, int8_t tzOffsetH) {
-    Serial.printf("[TIME] Attempting NTP sync with %s (TZ: %d)\n", server, tzOffsetH);
+    LOG_I("TIME", "Attempting NTP sync with %s (TZ: %d)", server, tzOffsetH);
 
 #ifdef ESP32
     // Record pre-NTP time to detect actual change
@@ -87,15 +89,15 @@ bool TimeManager::syncFromNTP(const char* server, int8_t tzOffsetH) {
         syncedEpoch_ = time(nullptr);
         syncMillis_ = millis();
         source_ = TimeSource::NTP;
-        Serial.printf("[TIME] NTP Sync SUCCESS: %ld (was %ld, delta=%lds)\n", 
-                      (long)syncedEpoch_, (long)preNtpTime, 
-                      (long)(syncedEpoch_ - preNtpTime));
+        LOG_I("TIME", "NTP Sync SUCCESS: %ld (was %ld, delta=%lds)",
+              (long)syncedEpoch_, (long)preNtpTime,
+              (long)(syncedEpoch_ - preNtpTime));
         saveToSD();
         return true;
     }
 #endif
 
-    Serial.println("[TIME] NTP Sync FAILED");
+    LOG_W("TIME", "NTP Sync FAILED");
     return false;
 }
 
@@ -164,8 +166,8 @@ bool TimeManager::syncFromGPS(uint8_t hour, uint8_t min, uint8_t sec,
     syncMillis_ = millis();
     source_ = TimeSource::GPS;
 
-    Serial.printf("[TIME] GPS Sync SUCCESS: %04d-%02d-%02d %02d:%02d:%02d\n",
-                  year, month, day, hour, min, sec);
+    LOG_I("TIME", "GPS Sync SUCCESS: %04d-%02d-%02d %02d:%02d:%02d",
+          year, month, day, hour, min, sec);
     
     saveToSD();
     return true;
@@ -191,7 +193,7 @@ bool TimeManager::loadFromSD() {
     file.close();
 
     if (error) {
-        Serial.println("[TIME] Failed to parse time_sync.json");
+        LOG_E("TIME", "Failed to parse time_sync.json");
         return false;
     }
 
@@ -213,7 +215,7 @@ bool TimeManager::loadFromSD() {
         settimeofday(&tv, nullptr);
 #endif
 
-        Serial.printf("[TIME] Loaded from SD cache: %ld\n", (long)cachedEpoch);
+        LOG_I("TIME", "Loaded from SD cache: %ld", (long)cachedEpoch);
         return true;
     }
 
@@ -241,7 +243,7 @@ bool TimeManager::saveToSD() {
     doc["savedAt"] = time(nullptr);
 
     if (serializeJson(doc, file) == 0) {
-        Serial.println("[TIME] Failed to write time_sync.json");
+        LOG_E("TIME", "Failed to write time_sync.json");
         file.close();
         return false;
     }

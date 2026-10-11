@@ -8,6 +8,7 @@
 #include "../ble/ble_scanner.h"
 #include "../ble/ble_spanner.h"
 #include "core/heap_policy.h"
+#include "utils/log.h"
 
 #if defined(TARGET_CARDPUTER)
 #include <M5Cardputer.h>
@@ -81,7 +82,7 @@ void SystemManager::logResetReason() {
             break;
     }
     
-    Serial.printf("[Boot] Reset reason: %s (crash count: %d)\n", reasonStr, rtcCrashCount);
+    LOG_I("BOOT", "Reset reason: %s (crash count: %d)", reasonStr, rtcCrashCount);
     
     if (!isCrash) {
         rtcCrashCount = 0;  // Reset on successful boot
@@ -95,12 +96,12 @@ void SystemManager::logResetReason() {
     
     // Bootloop protection: skip SD write if too many consecutive crashes
     if (rtcCrashCount > 3) {
-        Serial.printf("[Boot] WARNING: %d consecutive crashes! Skipping SD log to prevent bootloop.\n", rtcCrashCount);
+        LOG_W("BOOT", "%d consecutive crashes! Skipping SD log to prevent bootloop.", rtcCrashCount);
         return;
     }
     
     // Log crash to SD card
-    Serial.println("[Boot] CRASH DETECTED - Logging to SD card...");
+    LOG_W("BOOT", "CRASH DETECTED - Logging to SD card...");
     
     // Ensure logs directory exists (SD might not be mounted yet in main setup, 
     // but logResetReason is called after SDManager::init in main.cpp)
@@ -110,7 +111,7 @@ void SystemManager::logResetReason() {
     
     File logFile = SD.open("/adversary/logs/crash.log", FILE_APPEND);
     if (!logFile) {
-        Serial.println("[Boot] Failed to open crash log file!");
+        LOG_E("BOOT", "Failed to open crash log file!");
         return;
     }
     
@@ -127,7 +128,7 @@ void SystemManager::logResetReason() {
     
     logFile.close();
     
-    Serial.println("[Boot] Crash logged to /adversary/logs/crash.log");
+    LOG_I("BOOT", "Crash logged to /adversary/logs/crash.log");
 }
 
 void SystemManager::prepareForMemoryIntensiveTask(bool purgeCanvas, bool keepWifiUp) {
@@ -140,9 +141,9 @@ void SystemManager::prepareForMemoryIntensiveTask(bool purgeCanvas, bool keepWif
         size_t largest =
             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (largest < heap_policy::TLS_CONTIG_PURGE_FLOOR) {
-            Serial.printf("[System] Largest block %u < %u — forcing canvas purge for TLS\n",
-                          (unsigned int)largest,
-                          (unsigned int)heap_policy::TLS_CONTIG_PURGE_FLOOR);
+            LOG_W("SYSTEM", "Largest block %u < %u - forcing canvas purge for TLS",
+                  (unsigned int)largest,
+                  (unsigned int)heap_policy::TLS_CONTIG_PURGE_FLOOR);
             purgeCanvas = true;
         }
     }
@@ -151,8 +152,8 @@ void SystemManager::prepareForMemoryIntensiveTask(bool purgeCanvas, bool keepWif
         return; // Already stabilized and (no-purge-requested or already-purged)
     }
 
-    Serial.println("[System] Memory stabilization starting...");
-    Serial.printf("[System] Heap before: %u\n", (unsigned int)ESP.getFreeHeap());
+    LOG_I("SYSTEM", "Memory stabilization starting...");
+    LOG_D("SYSTEM", "Heap before: %u", (unsigned int)ESP.getFreeHeap());
 
     // 1. Release BLE memory (critically large)
     BLESpanner::getInstance().forceRelease();
@@ -180,13 +181,13 @@ void SystemManager::prepareForMemoryIntensiveTask(bool purgeCanvas, bool keepWif
     }
     
     m_isStabilized = true;
-    Serial.printf("[System] Stabilization complete. Heap: %u\n", (unsigned int)ESP.getFreeHeap());
+    LOG_I("SYSTEM", "Stabilization complete. Heap: %u", (unsigned int)ESP.getFreeHeap());
 }
 
 void SystemManager::restoreFromMemoryIntensiveTask() {
     if (!m_isStabilized) return;
 
-    Serial.println("[System] Restoring system state...");
+    LOG_I("SYSTEM", "Restoring system state...");
     
     // 1. Release BLE memory (just in case)
     BLEScanner::getInstance().deinit();
@@ -207,16 +208,16 @@ void SystemManager::restoreFromMemoryIntensiveTask() {
     // delay(100);
     
     m_isStabilized = false;
-    Serial.printf("[System] System state restored. Heap: %u\n", (unsigned int)ESP.getFreeHeap());
+    LOG_I("SYSTEM", "System state restored. Heap: %u", (unsigned int)ESP.getFreeHeap());
 }
 
 void SystemManager::logHeapStatus(const char* tag) {
-    size_t free = ESP.getFreeHeap();
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    size_t minFree = ESP.getMinFreeHeap();
-    
-    Serial.printf("[DIAG] %-15s | Free: %6zu | MaxBlock: %6zu | MinFree: %6zu\n", 
-                  tag, free, largest, minFree);
+    // Inlined so the whole telemetry statement (ESP heap calls included) vanishes
+    // when this DEBUG-level log compiles out at the INFO default.
+    LOG_D("DIAG", "%-15s | Free: %6zu | MaxBlock: %6zu | MinFree: %6zu",
+          tag, ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+          ESP.getMinFreeHeap());
+    (void)tag;  // only consumed by the debug log above
 }
 
 void SystemManager::setDisplayBrightness(uint8_t percentage) {
@@ -226,7 +227,7 @@ void SystemManager::setDisplayBrightness(uint8_t percentage) {
     // Apply brightness to display - range 0-255, our setting is 0-100%
     uint8_t brightness = (percentage * 255) / 100;
     M5.Display.setBrightness(brightness);
-    Serial.printf("[System] Brightness set to %d%% (%d/255)\n", (int)percentage, brightness);
+    LOG_D("SYSTEM", "Brightness set to %d%% (%d/255)", (int)percentage, brightness);
 #endif
 }
 
