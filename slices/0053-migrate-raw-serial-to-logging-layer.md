@@ -140,3 +140,67 @@ gate — this slice only shrinks its baseline, it does not touch the lint.
 _Filled in at merge, per wave. Records the final baseline state, the per-subsystem tag
 assignments and level splits, the cardputer/m5stick/native build figures, and the on-device
 spot-checks — confirming each Definition-of-Done scenario was met or recording the deviation._
+
+Every raw `Serial.print*` site recorded in `scripts/raw-serial-baseline.json` was converted
+to `LOG_E/W/I/D`. The baseline is now `[]`; `node scripts/lint-raw-serial.mjs src` exits zero,
+and the only files still calling `Serial.print*` are the two sanctioned sinks `src/utils/log.h`
+and `src/utils/error_logger.h` (**DoD scenario 1 met**). `Serial.begin(115200)` survives in
+`main.cpp` — it configures the port, it is not a log site, and the lint's regex does not match
+it.
+
+The work landed in **twelve subsystem-grouped commits** on `feature/raw-serial-migration`,
+leaf-first, each removing exactly its files from the baseline so the ratchet tightened
+monotonically and every commit stayed green:
+
+| # | Commit | Subsystem group | Principal tags |
+|---|--------|-----------------|----------------|
+| 1 | `931d42a` | `modules/ble`, `modules/gps` | BLE, BLESPAM, GPS, NMEA |
+| 2 | `d8efac1` | `modules/rf`, `modules/ir` | CC1101, RF, IR |
+| 3 | `2b7c95b` | `modules/network` | NET and subsystem tags |
+| 4 | `5a546b7` | `modules/wifi` | WIFI, SCAN, STA |
+| 5 | `32db108` | `modules/attack` | DEAUTH, EVILTWIN, KARMA |
+| 6 | `66b769d` | `modules/storage`, `modules/rfid` | REGISTRY, RFID |
+| 7 | `b426d0a` | capture, pcap, sniffer, server, captive portal | CAPTURE, PCAP, SNIFFER, SERVER, PORTAL |
+| 8 | `0ca1120` | `modules/system`, `core` events | SYS, EVENTBUS |
+| 9 | `34cb537` | `hal` expansion/input/storage | CC1101, NRF24, CAP, INPUT, LITTLEFS, SDMGR |
+| 10 | `868d687` | UI framework + simpler screens | SCREEN, BEACON, BLESCAN, RADIO, RFID, … |
+| 11 | `e1f9e61` | capture-heavy UI screens | CAPTURES, HS/AUTOHUNT/PMKID, SCANNER, SNIFFER |
+| 12 | `15c6409` | `main.cpp` + remaining `utils` | MAIN, MODULES, INIT, UI, INPUT, HSSAVE, HC22000, PMKIDSAVE, SHOT, RAWWIFI |
+
+Per-site levels followed D1 uniformly across all waves. Representative splits from the final
+wave (`main.cpp` + utils): start/stop lifecycle, boot banner, detect results and save
+successes are `LOG_I`; per-packet TX trace (`raw_wifi`), the 5-second loop heartbeat, GPS
+telemetry and the per-keypress/per-action dumps are `LOG_D` (stripped at the INFO default);
+input-validation rejects (`Unknown action`), the degraded no-SD boot and the canvas-restore
+escalation stages are `LOG_W`; canvas create/restore failure, directory-create and file
+open/write failures are `LOG_E` (teed to the SD error log on device). Tags were normalised
+from the existing `[Bracketed]` prefixes, one stable tag per subsystem (D3).
+
+All three non-mechanical cases from D2 were exercised. Non-literal first args were rewritten
+to `LOG_x("TAG", "%s", value)` with a literal format (DoD scenario 3 — e.g. the earlier
+network/wifi waves). Piecewise lines were consolidated into one call: in the final wave the
+six-call boot banner collapsed to one `LOG_I` with embedded `\n`s, and the two-print
+canvas-restore failure diagnostic collapsed to one `LOG_E`; the earlier radio/SD-ladder waves
+did the same for their edge-sample and frequency-ladder prints. No return-value/expression
+use of a `printf` survived — the compile was the backstop and flagged none. LOG_D compile-out
+hazards (a value read only by a `LOG_D` becoming unused at INFO) were handled by inlining the
+value into the call or marking the local `[[maybe_unused]]`; a final forced recompile of the
+touched TUs showed **no warnings** in any converted file.
+
+**Build (DoD scenario 2 met):** at the default `ADV_LOG_LEVEL=ADV_LOG_INFO`, all three targets
+are green at the final commit —
+
+- `pio test -e native`: **814/814** test cases succeeded (no assertion changes across the
+  migration; the native-filtered converted TUs — `sd_manager.cpp`, `raw_wifi.cpp`,
+  `screenshot.cpp`, and the `modules`/`core`/`utils` set — are exercised by their existing
+  suites, proving the swap behaviour-preserving there).
+- `pio run -e cardputer`: SUCCESS — Flash 74.1% (2 476 663 B), RAM 26.5% (86 704 B).
+- `pio run -e m5stick`: SUCCESS — Flash 77.0% (2 421 719 B), RAM 21.0% (68 768 B).
+
+**Deviation — on-device serial spot-check (Verification bullet 4) not performed.** The
+Cardputer-ADV serial check (confirming `LOG_I` lifecycle lines still print at INFO and a forced
+failure writes an `[ERROR]` record to `/adversary/logs/error.log` via the ESP32-only `LOG_E`
+SD tee) requires physical hardware not available in this environment. The SD-tee path itself is
+unchanged from slice-0052, which device-verified it; this slice only re-routed call sites
+through it. Left as the one open on-device confirmation before the release-strip (the separate
+deferred `ADV_LOG_LEVEL` item) is banked.
