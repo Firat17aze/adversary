@@ -17,6 +17,8 @@
 #include "../../../test/common/arduino_mocks.h"
 #endif
 
+#include "utils/log.h"
+
 namespace adversary {
 namespace gps {
 
@@ -182,9 +184,9 @@ bool NMEAParser::parseGGA(const char* sentence, GPSCoordinate* outCoord) {
     // DEBUG: Log parsed values periodically
     static uint32_t lastParseLog = 0;
     if (millis() - lastParseLog > 3000) {
-        Serial.printf("[NMEA] GGA parsed: fix=%d sats=%d hdop=%.1f valid=%d lat=%.6f lon=%.6f\n",
-                      fixQuality, sats, hdop, outCoord->valid ? 1 : 0,
-                      outCoord->latitude, outCoord->longitude);
+        LOG_D("NMEA", "GGA parsed: fix=%d sats=%d hdop=%.1f valid=%d lat=%.6f lon=%.6f",
+              fixQuality, sats, hdop, outCoord->valid ? 1 : 0,
+              outCoord->latitude, outCoord->longitude);
         lastParseLog = millis();
     }
     

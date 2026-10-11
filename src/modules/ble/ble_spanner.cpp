@@ -14,6 +14,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "nimble/nimble/host/include/host/ble_hs_id.h" // Required for ble_hs_id_set_rnd
+#include "utils/log.h"
 
 extern "C" {
     void esp_ble_gap_set_own_addr_type(uint8_t own_addr_type, bool useNRPA);
@@ -28,10 +29,10 @@ class HIDSecurityCallbacks : public NimBLESecurityCallbacks {
     bool onSecurityRequest() { return true; }
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
         if (!desc->sec_state.encrypted) {
-            Serial.println("[BLE] Auth Failed: Not Encrypted");
+            LOG_E("BLE", "Auth Failed: Not Encrypted");
             return;
         }
-        Serial.printf("[BLE] Auth Complete. Bonded: %d, Encrypted: %d\n", 
+        LOG_I("BLE", "Auth Complete. Bonded: %d, Encrypted: %d",
             desc->sec_state.bonded, desc->sec_state.encrypted);
     }
 };
@@ -72,7 +73,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     if (config.provider == BleSpamProvider::HID_KEYBOARD && 
         NimBLEDevice::getInitialized() && m_pServer != nullptr) {
         m_connectedCount = m_pServer->getConnectedCount();
-        Serial.printf("[BLE] HID restart: %d existing connection(s) detected\n", (int)m_connectedCount);
+        LOG_I("BLE", "HID restart: %d existing connection(s) detected", (int)m_connectedCount);
     } else {
         m_connectedCount = 0;
     }
@@ -88,7 +89,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     esp_base_mac_addr_set(m_originalMac);
     
     if (!NimBLEDevice::getInitialized()) {
-        Serial.println("[BLE] Starting NimBLE init...");
+        LOG_I("BLE", "Starting NimBLE init...");
         NimBLEDevice::init("ADV-BLE");
         NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     }
@@ -136,15 +137,15 @@ void BLESpanner::start(const BleSpamConfig& config) {
                 
                 for(int i=0; i<6; i++) mac[i] = (uint8_t)m[i];
                 esp_base_mac_addr_set(mac);
-                Serial.printf("[BLE] Using Fixed MAC: %s\n", fixedMac);
+                LOG_I("BLE", "Using Fixed MAC: %s", fixedMac);
             } else {
-                Serial.println("[BLE] Invalid Fixed MAC format, using Factory.");
+                LOG_W("BLE", "Invalid Fixed MAC format, using Factory.");
                 esp_base_mac_addr_set(m_originalMac);
             }
         } else {
             // Factory Default
             esp_base_mac_addr_set(m_originalMac);
-            Serial.println("[BLE] Using Factory MAC for HID.");
+            LOG_I("BLE", "Using Factory MAC for HID.");
         }
     }
 
@@ -225,19 +226,19 @@ void BLESpanner::start(const BleSpamConfig& config) {
 
             // Start the Server to accept connections
             m_pServer->start(); // Re-enabled for testing (Popup fix?)
-            Serial.println("[BLE] HID Service started");
+            LOG_I("BLE", "HID Service started");
         } else {
             // Service already exists from previous start - re-fetch characteristic pointer
             m_pHidInput = pHidService->getCharacteristic(NimBLEUUID((uint16_t)0x2a4d));
-            Serial.printf("[BLE] getCharacteristic returned: %p\n", (void*)m_pHidInput);
+            LOG_D("BLE", "getCharacteristic returned: %p", (void*)m_pHidInput);
             if (m_pHidInput) {
-                Serial.println("[BLE] HID Service reused, characteristic re-acquired");
+                LOG_I("BLE", "HID Service reused, characteristic re-acquired");
             } else {
-                Serial.println("[BLE] ERROR: HID Input characteristic not found!");
+                LOG_E("BLE", "HID Input characteristic not found!");
             }
             // IMPORTANT: Re-start the server after deinit/reinit cycle
             m_pServer->start();
-            Serial.println("[BLE] Server re-started for reused HID service");
+            LOG_I("BLE", "Server re-started for reused HID service");
         }
         
         // Update advertising to include HID appearance and service
@@ -264,7 +265,7 @@ void BLESpanner::stop() {
     if (!m_active) return;
     
     m_active = false;
-    Serial.println("[BLE] Stopping background task...");
+    LOG_I("BLE", "Stopping background task...");
     
     // Wait for task to signal it's exiting
     uint32_t stopTimeout = millis();
@@ -288,7 +289,7 @@ void BLESpanner::stop() {
     // Just stop advertising and let the connection drop naturally.
     // The BLE stack and services remain intact for quick restart.
     if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
-        Serial.println("[BLE] HID mode - skipping deinit to preserve stack state");
+        LOG_I("BLE", "HID mode - skipping deinit to preserve stack state");
         // Just stop advertising, don't tear down the stack
         if (m_pAdvertising) m_pAdvertising->stop();
         // Note: We do NOT null m_pServer or m_pAdvertising for HID mode
@@ -297,16 +298,16 @@ void BLESpanner::stop() {
         if (NimBLEDevice::getInitialized()) {
             vTaskDelay(pdMS_TO_TICKS(100));
             
-            Serial.println("[BLE] Stopping Advertising...");
-            if (m_pAdvertising) m_pAdvertising->stop(); 
-            
+            LOG_I("BLE", "Stopping Advertising...");
+            if (m_pAdvertising) m_pAdvertising->stop();
+
             vTaskDelay(pdMS_TO_TICKS(100));
-            
-            Serial.println("[BLE] Releasing controller radio (deinit false)...");
+
+            LOG_I("BLE", "Releasing controller radio (deinit false)...");
             try {
                 NimBLEDevice::deinit(false);
             } catch (...) {
-                Serial.println("[BLE] Exception during radio deinit");
+                LOG_E("BLE", "Exception during radio deinit");
             }
             
             m_pServer = nullptr;
@@ -316,7 +317,7 @@ void BLESpanner::stop() {
 
     // Restore base MAC
     esp_base_mac_addr_set(m_originalMac);
-    Serial.println("[BLE] Spanner stopped.");
+    LOG_I("BLE", "Spanner stopped.");
 }
 
 void BLESpanner::forceRelease() {
@@ -328,7 +329,7 @@ void BLESpanner::forceRelease() {
     }
     
     if (NimBLEDevice::getInitialized()) {
-        Serial.println("[BLE] Force releasing NimBLE stack (screen transition)...");
+        LOG_I("BLE", "Force releasing NimBLE stack (screen transition)...");
         if (m_pAdvertising) {
             m_pAdvertising->stop();
         }
@@ -344,12 +345,12 @@ void BLESpanner::forceRelease() {
             // on re-init, but with invalid BLE handles — HID keys silently fail.
             NimBLEDevice::deinit(true);
         } catch (...) {
-            Serial.println("[BLE] Exception during forced deinit");
+            LOG_E("BLE", "Exception during forced deinit");
         }
         m_pServer = nullptr;
         m_pAdvertising = nullptr;
         m_pHidInput = nullptr;
-        Serial.printf("[BLE] Stack released. Heap: %u\n", (unsigned int)ESP.getFreeHeap());
+        LOG_I("BLE", "Stack released. Heap: %u", (unsigned int)ESP.getFreeHeap());
     }
 }
 
@@ -435,10 +436,10 @@ void BLESpanner::runSpamCycle() {
     // Set random address in host stack
     int rc = ble_hs_id_set_rnd(mac);
     if (rc != 0) {
-        Serial.printf("[BLE] Failed to set random addr: %d\n", rc);
+        LOG_E("BLE", "Failed to set random addr: %d", rc);
     } else {
         // Only print if successful
-        Serial.printf("[BLE] MAC Rotated to %02X:%02X:%02X:%02X:%02X:%02X\n", 
+        LOG_D("BLE", "MAC Rotated to %02X:%02X:%02X:%02X:%02X:%02X",
             mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
     }
 
@@ -448,8 +449,6 @@ void BLESpanner::runSpamCycle() {
     
     updatePayload();
     // m_pAdvertising->start(); // Moved to main loop
-    
-    // Serial.printf("[BLE] MAC Rotated (Random) to %02X:%02X:%02X...\n", mac[0], mac[1], mac[2]);
 }
 
 void BLESpanner::generateRandomMac() {
@@ -469,9 +468,9 @@ void BLESpanner::generateRandomMac() {
     
     esp_err_t err = esp_base_mac_addr_set(mac);
     if (err != ESP_OK) {
-        Serial.printf("[BLE] MAC rotation error: %d\n", err);
+        LOG_E("BLE", "MAC rotation error: %d", err);
     } else {
-        Serial.printf("[BLE] MAC rotated to %02X:%02X:%02X...\n", mac[0], mac[1], mac[2]);
+        LOG_D("BLE", "MAC rotated to %02X:%02X:%02X...", mac[0], mac[1], mac[2]);
     }
 }
 
@@ -480,7 +479,7 @@ void BLESpanner::setIntensity(uint8_t level) {
     
     m_config.intensity = level;
     // Map intensity 1-10 to intervals 500ms down to 20ms
-    uint32_t interval = 500 - (uint32_t)(level - 1) * 50; 
+    uint32_t interval = 500 - (uint32_t)(level - 1) * 50;
     if (interval < 20) interval = 20;
     
     m_pAdvertising->setMinInterval(interval / 0.625);
@@ -489,7 +488,7 @@ void BLESpanner::setIntensity(uint8_t level) {
 
 void BLESpanner::setLayout(KeyboardLayout layout) {
     m_layout = layout;
-    Serial.printf("[BLE] Keyboard Layout set to: %s\n", (layout == KeyboardLayout::US) ? "US" : "ES");
+    LOG_I("BLE", "Keyboard Layout set to: %s", (layout == KeyboardLayout::US) ? "US" : "ES");
 }
 
 void BLESpanner::update() {
@@ -500,7 +499,7 @@ void BLESpanner::onConnect(NimBLEServer* pServer) {
     m_connectedCount++;
     m_interactionCount = m_interactionCount + 1;
     m_lastPayload = "> CONNECTED [!]";
-    Serial.println("[BLE] Device connected!");
+    LOG_I("BLE", "Device connected!");
     
     // Trigger semantic event for notification
     EventData event(EventType::BLE_CONNECTED);
@@ -509,7 +508,7 @@ void BLESpanner::onConnect(NimBLEServer* pServer) {
 
 void BLESpanner::onDisconnect(NimBLEServer* pServer) {
     if (m_connectedCount > 0) m_connectedCount--;
-    Serial.println("[BLE] Device disconnected");
+    LOG_I("BLE", "Device disconnected");
 }
 
 void BLESpanner::updatePayload() {
@@ -539,7 +538,7 @@ void BLESpanner::updatePayload() {
         GfpsProfile active = profiles[m_lastModelIdx];
         dName = active.name;
         
-        Serial.printf("[BLE] Spoofing [%d/%d]: %s (0x%06X)\n", 
+        LOG_D("BLE", "Spoofing [%d/%d]: %s (0x%06X)",
             m_lastModelIdx + 1, numProfiles, active.name, (unsigned int)active.id);
 
         // 1. Flags (3 bytes)
@@ -631,7 +630,7 @@ void BLESpanner::updatePayload() {
         logPtr += sprintf(logPtr, "%02X ", finalP[i]);
     }
     m_lastPayload = hexBuf;
-    Serial.printf("[BLE] Payload: %s\n", hexBuf);
+    LOG_D("BLE", "Payload: %s", hexBuf);
 }
 
 std::vector<uint8_t> BLESpanner::buildPayload() {
@@ -742,10 +741,10 @@ std::vector<uint8_t> BLESpanner::buildPayload() {
 }
 
 void BLESpanner::sendKey(uint8_t keycode, uint8_t modifiers) {
-    Serial.printf("[BLE] sendKey called: m_pHidInput=%p, m_connectedCount=%d\n", 
+    LOG_D("BLE", "sendKey called: m_pHidInput=%p, m_connectedCount=%d",
                   (void*)m_pHidInput, (int)m_connectedCount);
     if (!m_pHidInput || m_connectedCount == 0) {
-        Serial.printf("[BLE] sendKey failed: HidInput=%p, connCount=%d\n", 
+        LOG_W("BLE", "sendKey failed: HidInput=%p, connCount=%d",
                      (void*)m_pHidInput, (int)m_connectedCount);
         return;
     }
@@ -755,7 +754,7 @@ void BLESpanner::sendKey(uint8_t keycode, uint8_t modifiers) {
     m_pHidInput->setValue(report, 8);
     m_pHidInput->setValue(report, 8);
     m_pHidInput->notify();
-    Serial.printf("[BLE] Key sent: 0x%02X (notify called)\n", keycode);
+    LOG_D("BLE", "Key sent: 0x%02X (notify called)", keycode);
     
     vTaskDelay(pdMS_TO_TICKS(10));
     

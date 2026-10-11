@@ -6,6 +6,7 @@
 #include "ble_scanner.h"
 #include "ble_utils.h"
 #include "../system/system_manager.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -19,7 +20,7 @@ BLEScanner::BLEScanner()
 void BLEScanner::init() {
     if (NimBLEDevice::getInitialized()) return;
     
-    Serial.printf("[BLE] Starting NimBLE init (Heap: %u)\n", (unsigned int)ESP.getFreeHeap());
+    LOG_I("BLE", "Starting NimBLE init (Heap: %u)", (unsigned int)ESP.getFreeHeap());
     NimBLEDevice::init("ADV-BLE");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     
@@ -28,7 +29,7 @@ void BLEScanner::init() {
     // because NimBLEDevice::m_ownAddrType persists across soft-deinit/re-init cycles.
     NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_PUBLIC);
     
-    Serial.printf("[BLE] NimBLE initialized (Heap: %u)\n", (unsigned int)ESP.getFreeHeap());
+    LOG_I("BLE", "NimBLE initialized (Heap: %u)", (unsigned int)ESP.getFreeHeap());
 }
 
 bool BLEScanner::isInitialized() {
@@ -57,14 +58,14 @@ void BLEScanner::deinit() {
         pScan->clearResults();
     }
 
-    Serial.println("[BLE] Releasing controller radio (deinit false)...");
+    LOG_I("BLE", "Releasing controller radio (deinit false)...");
     try {
         NimBLEDevice::deinit(false);
     } catch (...) {
-        Serial.println("[BLE] Exception during radio deinit");
+        LOG_E("BLE", "Exception during radio deinit");
     }
 
-    Serial.println("[BLE] Scanner shut down (radio released, host objects retained)");
+    LOG_I("BLE", "Scanner shut down (radio released, host objects retained)");
 }
 
 void BLEScanner::startScan(uint32_t durationSeconds) {
@@ -80,9 +81,9 @@ void BLEScanner::startScan(uint32_t durationSeconds) {
     if (pScan->start(durationSeconds, nullptr, false)) {
         m_scanning = true;
         m_scanStartTime = millis();
-        Serial.printf("[BLE] Scan started for %u seconds\n", (unsigned int)durationSeconds);
+        LOG_I("BLE", "Scan started for %u seconds", (unsigned int)durationSeconds);
     } else {
-        Serial.println("[BLE] Failed to start scan");
+        LOG_E("BLE", "Failed to start scan");
     }
 }
 
@@ -94,7 +95,7 @@ void BLEScanner::stopScan() {
         pScan->stop();
     }
     m_scanning = false;
-    Serial.println("[BLE] Scan stopped");
+    LOG_I("BLE", "Scan stopped");
 }
 
 std::vector<BLEDeviceInfo> BLEScanner::getDevices() {
@@ -108,7 +109,7 @@ void BLEScanner::clearDevices() {
     m_devices.clear();
     m_devices.shrink_to_fit(); // CRITICAL: Release memory capacity back to heap
     if (hadDevices) {
-        Serial.println("[BLE] Results cleared (RAM freed)");
+        LOG_I("BLE", "Results cleared (RAM freed)");
     }
 }
 

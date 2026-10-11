@@ -17,6 +17,8 @@
 #include "../../../test/common/arduino_mocks.h"
 #endif
 
+#include "utils/log.h"
+
 namespace adversary {
 
 static GPSManager* s_instance = nullptr;
@@ -62,15 +64,15 @@ bool GPSManager::init(bool probeCapPort) {
         // attached. Skip it on a silent line — the common case — and only spend the
         // timeouts once we know a device is actually transmitting on this pin set.
         if (!probePinSetCarrier(pins)) {
-            Serial.printf("[GPS] %s: no carrier, skipping\n", pins.name);
+            LOG_D("GPS", "%s: no carrier, skipping", pins.name);
             continue;
         }
 
         for (size_t c = 0; c < gps::GPS_PROFILE_COUNT && !detected_; ++c) {
             const gps::GPSProfile& profile = gps::GPS_PROFILES[c];
 
-            Serial.printf("[GPS] Probing %s on %s at %u baud...\n",
-                          profile.chipName, pins.name, profile.baudRate);
+            LOG_D("GPS", "Probing %s on %s at %u baud...",
+                  profile.chipName, pins.name, profile.baudRate);
 
             gpsSerial_->begin(profile.baudRate, SERIAL_8N1, pins.rxPin, pins.txPin);
 
@@ -102,9 +104,9 @@ bool GPSManager::init(bool probeCapPort) {
     initialized_ = true;
 
     if (detected_) {
-        Serial.printf("[GPS] Detected %s on %s\n", detectedChip_, detectedPinSet_);
+        LOG_I("GPS", "Detected %s on %s", detectedChip_, detectedPinSet_);
     } else {
-        Serial.println("[GPS] No GPS module found");
+        LOG_I("GPS", "No GPS module found");
         delete gpsSerial_;
         gpsSerial_ = nullptr;
     }
@@ -199,12 +201,12 @@ void GPSManager::update() {
                 static uint32_t lastGGALog = 0;
                 if (millis() - lastGGALog > 5000) {
                     if (coord.valid) {
-                        Serial.printf("[GPS] GGA: lat=%.6f lon=%.6f alt=%.1f sats=%d fix=%d hdop=%.1f\n",
-                                      coord.latitude, coord.longitude, coord.altitude,
-                                      coord.satellites, coord.fixQuality, coord.hdop);
+                        LOG_D("GPS", "GGA: lat=%.6f lon=%.6f alt=%.1f sats=%d fix=%d hdop=%.1f",
+                              coord.latitude, coord.longitude, coord.altitude,
+                              coord.satellites, coord.fixQuality, coord.hdop);
                     } else {
-                        Serial.printf("[GPS] GGA: Acquiring satellites (%d sats, hdop=%.1f)\n",
-                                      coord.satellites, coord.hdop);
+                        LOG_D("GPS", "GGA: Acquiring satellites (%d sats, hdop=%.1f)",
+                              coord.satellites, coord.hdop);
                     }
                     lastGGALog = millis();
                 }
@@ -232,7 +234,7 @@ void GPSManager::update() {
                     // This helps track progress toward fix
                     static uint32_t lastRMCLog = 0;
                     if (millis() - lastRMCLog > 10000) {
-                        Serial.printf("[GPS] RMC: Waiting for fix (status=V)\n");
+                        LOG_D("GPS", "RMC: Waiting for fix (status=V)");
                         lastRMCLog = millis();
                     }
                 }
@@ -318,7 +320,7 @@ bool GPSManager::tryRedetect(bool probeCapPort) {
     bool result = init(probeCapPort);
 
     if (result) {
-        Serial.println("[GPS] Module re-detected!");
+        LOG_I("GPS", "Module re-detected!");
     }
     
     return result;
@@ -339,7 +341,7 @@ void GPSManager::startBackgroundDetection(bool probeCapPort) {
         return;
     }
     
-    Serial.println("[GPS] Starting background detection task");
+    LOG_I("GPS", "Starting background detection task");
     
     xTaskCreatePinnedToCore(
         backgroundDetectionTask,
@@ -358,7 +360,7 @@ void GPSManager::stopBackgroundDetection() {
     if (taskHandle_ != nullptr) {
         vTaskDelete((TaskHandle_t)taskHandle_);
         taskHandle_ = nullptr;
-        Serial.println("[GPS] Background detection task stopped");
+        LOG_I("GPS", "Background detection task stopped");
     }
 #endif
 }
@@ -375,13 +377,13 @@ void GPSManager::backgroundDetectionTask(void* param) {
         
         // Try to detect GPS
         if (self->tryRedetect(self->bgProbeCapPort_)) {
-            Serial.println("[GPS] Background detection succeeded - stopping task");
+            LOG_I("GPS", "Background detection succeeded - stopping task");
             self->taskHandle_ = nullptr;
             vTaskDelete(nullptr);  // Delete self
             return;
         }
         
-        Serial.println("[GPS] Background detection: GPS not found, retrying in 30s...");
+        LOG_D("GPS", "Background detection: GPS not found, retrying in 30s...");
     }
 #else
     (void)param;

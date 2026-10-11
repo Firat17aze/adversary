@@ -5,6 +5,7 @@
 
 #include "classic_bt.h"
 #include <Arduino.h>
+#include "utils/log.h"
 
 #ifdef HAS_CLASSIC_BT
 #include "esp_bt.h"
@@ -53,8 +54,8 @@ bool ClassicBT::startBonding(const uint8_t* address) {
 #else
     if (m_isBonding) return false;
 
-    Serial.printf("[ClassicBT] Attempting to bond with %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  address[0], address[1], address[2], address[3], address[4], address[5]);
+    LOG_I("CLASSICBT", "Attempting to bond with %02X:%02X:%02X:%02X:%02X:%02X",
+          address[0], address[1], address[2], address[3], address[4], address[5]);
     
     m_isBonding = true;
     m_status = "BONDING...";
@@ -71,7 +72,7 @@ bool ClassicBT::startBonding(const uint8_t* address) {
     if (ret == ESP_OK) {
         // Trigger bond
         // This is a simplified implementation. Full hijack requires SDP and SPP/HID registration.
-        Serial.println("[ClassicBT] Bonding request sent");
+        LOG_I("CLASSICBT", "Bonding request sent");
         m_status = "REQUEST SENT";
     } else {
         m_status = "ERROR";
