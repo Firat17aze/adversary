@@ -6,6 +6,7 @@
 #include "pcap_writer.h"
 #include "hal/storage/sd_manager.h"
 #include "modules/sniffer/packet_sniffer.h"
+#include "utils/log.h"
 #include <SD.h>
 #include <ctime>
 #include <cstring>
@@ -45,7 +46,7 @@ bool PcapWriter::open(const char* filename, PcapLinkType linkType, uint32_t snap
     
     // Check if SD is available
     if (!SDManager::getInstance().isReady()) {
-        Serial.println("[PCAP] SD card not ready");
+        LOG_W("PCAP", "SD card not ready");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -57,7 +58,7 @@ bool PcapWriter::open(const char* filename, PcapLinkType linkType, uint32_t snap
         std::string dir = path.substr(0, lastSlash);
         if (!SD.exists(dir.c_str())) {
             if (!SDManager::getInstance().createDirectory(dir.c_str())) {
-                Serial.printf("[PCAP] Failed to create directory: %s\n", dir.c_str());
+                LOG_E("PCAP", "Failed to create directory: %s", dir.c_str());
                 m_state = PcapWriterState::ERROR;
                 return false;
             }
@@ -67,7 +68,7 @@ bool PcapWriter::open(const char* filename, PcapLinkType linkType, uint32_t snap
     // Open file for writing
     m_file = SD.open(filename, FILE_WRITE);
     if (!m_file) {
-        Serial.printf("[PCAP] Failed to open file: %s\n", filename);
+        LOG_E("PCAP", "Failed to open file: %s", filename);
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -88,7 +89,7 @@ bool PcapWriter::open(const char* filename, PcapLinkType linkType, uint32_t snap
     m_linkType = linkType;
     m_state = PcapWriterState::OPEN;
     
-    Serial.printf("[PCAP] Opened file: %s (link type %u)\n", filename, static_cast<uint32_t>(linkType));
+    LOG_I("PCAP", "Opened file: %s (link type %u)", filename, static_cast<uint32_t>(linkType));
     return true;
 }
 
@@ -99,8 +100,8 @@ void PcapWriter::close()
     }
     
     if (m_state == PcapWriterState::OPEN) {
-        Serial.printf("[PCAP] Closed file: %s (%u packets, %u bytes)\n", 
-                      m_filename.c_str(), m_packetCount, m_bytesWritten);
+        LOG_I("PCAP", "Closed file: %s (%u packets, %u bytes)",
+              m_filename.c_str(), m_packetCount, m_bytesWritten);
     }
     
     m_state = PcapWriterState::CLOSED;
@@ -121,7 +122,7 @@ bool PcapWriter::writeGlobalHeader(PcapLinkType linkType, uint32_t snaplen)
     size_t written = m_file.write(reinterpret_cast<const uint8_t*>(&header), 
                                    sizeof(header));
     if (written != sizeof(header)) {
-        Serial.println("[PCAP] Failed to write global header");
+        LOG_E("PCAP", "Failed to write global header");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -158,7 +159,7 @@ bool PcapWriter::writePacket(const uint8_t* data, uint16_t length, uint32_t time
     size_t written = m_file.write(reinterpret_cast<const uint8_t*>(&header), 
                                    sizeof(header));
     if (written != sizeof(header)) {
-        Serial.println("[PCAP] Failed to write packet header");
+        LOG_E("PCAP", "Failed to write packet header");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -166,7 +167,7 @@ bool PcapWriter::writePacket(const uint8_t* data, uint16_t length, uint32_t time
     // Write packet data
     written = m_file.write(data, length);
     if (written != length) {
-        Serial.println("[PCAP] Failed to write packet data");
+        LOG_E("PCAP", "Failed to write packet data");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -214,7 +215,7 @@ bool PcapWriter::writePacketWithRadiotap(const uint8_t* data, uint16_t length, u
     // Write packet header
     size_t written = m_file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header));
     if (written != sizeof(header)) {
-        Serial.println("[PCAP] Failed to write packet header");
+        LOG_E("PCAP", "Failed to write packet header");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -222,7 +223,7 @@ bool PcapWriter::writePacketWithRadiotap(const uint8_t* data, uint16_t length, u
     // Write radiotap header
     written = m_file.write(reinterpret_cast<const uint8_t*>(&radiotap), sizeof(radiotap));
     if (written != sizeof(radiotap)) {
-        Serial.println("[PCAP] Failed to write radiotap header");
+        LOG_E("PCAP", "Failed to write radiotap header");
         m_state = PcapWriterState::ERROR;
         return false;
     }
@@ -230,7 +231,7 @@ bool PcapWriter::writePacketWithRadiotap(const uint8_t* data, uint16_t length, u
     // Write 802.11 frame data
     written = m_file.write(data, length);
     if (written != length) {
-        Serial.println("[PCAP] Failed to write packet data");
+        LOG_E("PCAP", "Failed to write packet data");
         m_state = PcapWriterState::ERROR;
         return false;
     }

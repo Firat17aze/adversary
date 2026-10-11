@@ -6,6 +6,7 @@
 #include "packet_sniffer.h"
 #include "../../core/event_bus.h"
 #include "../../utils/wifi_utils.h"
+#include "utils/log.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -204,7 +205,7 @@ bool PacketSniffer::init() {
     m_stats.reset();
     m_initialized = true;
     
-    Serial.println("[Sniffer] Initialized");
+    LOG_I("SNIFFER", "Initialized");
     return true;
 }
 
@@ -243,7 +244,7 @@ bool PacketSniffer::start(PacketCallback callback) {
     // run while capturing nothing.
     auto filter = wifi_utils::allFrameFilter();
     if (!wifi_utils::enablePromiscuous(promiscuousCallback, &filter)) {
-        Serial.println("[Sniffer] ERROR: promiscuous enable failed (WiFi driver not ready)");
+        LOG_E("SNIFFER", "promiscuous enable failed (WiFi driver not ready)");
         m_state = SnifferState::STOPPED;
         return false;
     }
@@ -252,7 +253,7 @@ bool PacketSniffer::start(PacketCallback callback) {
     m_state = SnifferState::RUNNING;
     m_lastHopTime = millis();
     
-    Serial.printf("[Sniffer] Started on channel %d\n", m_stats.currentChannel);
+    LOG_I("SNIFFER", "Started on channel %d", m_stats.currentChannel);
     return true;
 }
 
@@ -272,7 +273,7 @@ void PacketSniffer::stop() {
     // cached "initialised" flag can no longer be trusted. See slices/0040.
     m_initialized = false;
 
-    Serial.printf("[Sniffer] Stopped. Captured %lu packets\n", m_stats.totalPackets);
+    LOG_I("SNIFFER", "Stopped. Captured %lu packets", m_stats.totalPackets);
 }
 
 void PacketSniffer::update() {
@@ -293,7 +294,7 @@ bool PacketSniffer::setChannel(uint8_t channel) {
     
 #ifdef ARDUINO
     if (!wifi_utils::setChannel(channel)) {
-        Serial.printf("[Sniffer] Failed to set channel %d\n", channel);
+        LOG_W("SNIFFER", "Failed to set channel %d", channel);
         return false;
     }
 #endif
@@ -308,21 +309,21 @@ void PacketSniffer::setChannelHopping(bool enable, uint32_t intervalMs) {
     m_hopChannelIndex = 0;
     
     if (enable) {
-        Serial.printf("[Sniffer] Channel hopping enabled (%lu ms)\n", intervalMs);
+        LOG_I("SNIFFER", "Channel hopping enabled (%lu ms)", intervalMs);
     } else {
-        Serial.println("[Sniffer] Channel hopping disabled");
+        LOG_I("SNIFFER", "Channel hopping disabled");
     }
 }
 
 void PacketSniffer::targetBSSID(const uint8_t* bssid) {
     m_filter.setBSSIDFilter(bssid);
-    Serial.printf("[Sniffer] Targeting BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+    LOG_I("SNIFFER", "Targeting BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
+          bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
 }
 
 void PacketSniffer::clearTarget() {
     m_filter.clearBSSIDFilter();
-    Serial.println("[Sniffer] BSSID filter cleared");
+    LOG_I("SNIFFER", "BSSID filter cleared");
 }
 
 void PacketSniffer::hopChannel() {

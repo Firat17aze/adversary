@@ -13,6 +13,7 @@
 #include <dhcpserver/dhcpserver.h>  // For DHCP server types
 #include <esp_wifi.h>
 #include <SD.h>
+#include "utils/log.h"
 
 // IP/TCP/UDP header offsets for promiscuous mode parsing
 #define IP_HEADER_OFFSET 34        // After 802.11 header (varies)
@@ -39,12 +40,12 @@ bool TrafficProxy::setupNAT() {
 #ifdef ESP32
     // Check prerequisites
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[Proxy] ERROR: WiFi not connected to upstream AP");
+        LOG_E("PROXY", "WiFi not connected to upstream AP");
         return false;
     }
-    
+
     if (WiFi.softAPIP() == IPAddress(0, 0, 0, 0)) {
-        Serial.println("[Proxy] ERROR: SoftAP not active");
+        LOG_E("PROXY", "SoftAP not active");
         return false;
     }
     
@@ -52,31 +53,30 @@ bool TrafficProxy::setupNAT() {
     // This uses the ESP-IDF 5.x esp_netif_napt_enable API
     
     IPAddress softApIp = WiFi.softAPIP();
-    IPAddress gatewayIp = WiFi.gatewayIP();
-    
-    Serial.println("[Proxy] Setting up NAT...");
-    Serial.printf("[Proxy] SoftAP IP: %s\n", softApIp.toString().c_str());
-    Serial.printf("[Proxy] Station IP: %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("[Proxy] Gateway IP: %s\n", gatewayIp.toString().c_str());
-    
+
+    LOG_I("PROXY", "Setting up NAT...");
+    LOG_D("PROXY", "SoftAP IP: %s", softApIp.toString().c_str());
+    LOG_D("PROXY", "Station IP: %s", WiFi.localIP().toString().c_str());
+    LOG_D("PROXY", "Gateway IP: %s", WiFi.gatewayIP().toString().c_str());
+
     // Get the SoftAP network interface handle
     esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     if (ap_netif == nullptr) {
-        Serial.println("[Proxy] ERROR: Could not get SoftAP network interface!");
+        LOG_E("PROXY", "Could not get SoftAP network interface!");
         return false;
     }
     
     // Enable NAPT on the SoftAP interface (ESP-IDF 5.x API)
     esp_err_t err = esp_netif_napt_enable(ap_netif);
     if (err != ESP_OK) {
-        Serial.printf("[Proxy] ERROR: esp_netif_napt_enable failed: %s\n", esp_err_to_name(err));
+        LOG_E("PROXY", "esp_netif_napt_enable failed: %s", esp_err_to_name(err));
         // Fallback to legacy API
-        Serial.println("[Proxy] Trying legacy ip_napt_enable...");
+        LOG_W("PROXY", "Trying legacy ip_napt_enable...");
         LOCK_TCPIP_CORE();
         ip_napt_enable(softApIp, 1);
         UNLOCK_TCPIP_CORE();
     } else {
-        Serial.println("[Proxy] esp_netif_napt_enable succeeded!");
+        LOG_D("PROXY", "esp_netif_napt_enable succeeded!");
     }
     
     // Configure DNS for SoftAP clients
@@ -97,12 +97,12 @@ bool TrafficProxy::setupNAT() {
         
         esp_netif_dhcps_start(ap_netif);  // Restart DHCP server
         
-        char dns_str[16];
+        [[maybe_unused]] char dns_str[16];
         ip4addr_ntoa_r((const ip4_addr_t*)&dns_info.ip.u_addr.ip4, dns_str, sizeof(dns_str));
-        Serial.printf("[Proxy] Configured DNS for AP clients: %s\n", dns_str);
+        LOG_D("PROXY", "Configured DNS for AP clients: %s", dns_str);
     } else {
         // Fallback to Google DNS
-        Serial.println("[Proxy] Using fallback DNS: 8.8.8.8");
+        LOG_W("PROXY", "Using fallback DNS: 8.8.8.8");
         esp_netif_dhcps_stop(ap_netif);
         
         dhcps_offer_t offer_dns = OFFER_DNS;
@@ -116,7 +116,7 @@ bool TrafficProxy::setupNAT() {
     }
     
     natEnabled_ = true;
-    Serial.println("[Proxy] NAT enabled - forwarding SoftAP traffic to Station");
+    LOG_I("PROXY", "NAT enabled - forwarding SoftAP traffic to Station");
     
     return true;
 #else
@@ -132,7 +132,7 @@ void TrafficProxy::teardownNAT() {
         ip_napt_enable(WiFi.softAPIP(), 0);
         UNLOCK_TCPIP_CORE();
         natEnabled_ = false;
-        Serial.println("[Proxy] NAT disabled");
+        LOG_I("PROXY", "NAT disabled");
     }
 #endif
 }
@@ -160,8 +160,8 @@ bool TrafficProxy::start() {
     uniqueDomains_.clear();
     
 #ifdef ESP32
-    Serial.println("[Proxy] Starting traffic proxy...");
-    
+    LOG_I("PROXY", "Starting traffic proxy...");
+
     if (!setupNAT()) {
         state_ = ProxyState::ERROR;
         return false;
@@ -171,11 +171,11 @@ bool TrafficProxy::start() {
     // KarmaAP already has promiscuous mode enabled with its probe callback.
     // Setting our callback would overwrite Karma's probe capture.
     // NAT works at a lower level and doesn't require promiscuous mode for traffic forwarding.
-    Serial.println("[Proxy] NAT-only mode (Karma handles probe capture)");
-    
+    LOG_D("PROXY", "NAT-only mode (Karma handles probe capture)");
+
     lastSaveTime_ = millis();
     state_ = ProxyState::RUNNING;
-    Serial.println("[Proxy] Traffic proxy running");
+    LOG_I("PROXY", "Traffic proxy running");
     return true;
 #else
     state_ = ProxyState::ERROR;
@@ -191,13 +191,13 @@ void TrafficProxy::stop() {
     state_ = ProxyState::STOPPING;
     
 #ifdef ESP32
-    Serial.println("[Proxy] Stopping traffic proxy...");
-    
+    LOG_I("PROXY", "Stopping traffic proxy...");
+
     // Disable promiscuous mode
     if (promiscuousEnabled_) {
         esp_wifi_set_promiscuous(false);
         promiscuousEnabled_ = false;
-        Serial.println("[Proxy] Promiscuous mode disabled");
+        LOG_D("PROXY", "Promiscuous mode disabled");
     }
     
     // Auto-save before stopping
@@ -212,8 +212,8 @@ void TrafficProxy::stop() {
     state_ = ProxyState::STOPPED;
     
 #ifdef ESP32
-    Serial.printf("[Proxy] Stopped. Stats: %lu packets, %lu DNS, %lu HTTP\n",
-                  stats_.totalPackets, stats_.dnsQueries, stats_.httpRequests);
+    LOG_I("PROXY", "Stopped. Stats: %lu packets, %lu DNS, %lu HTTP",
+          stats_.totalPackets, stats_.dnsQueries, stats_.httpRequests);
 #endif
 }
 
@@ -319,9 +319,7 @@ void TrafficProxy::processDNSPacket(const uint8_t* data, uint16_t len, const uin
         dnsCallback_(query);
     }
     
-#ifdef ESP32
-    Serial.printf("[Proxy] DNS: %s\n", domain);
-#endif
+    LOG_D("PROXY", "DNS: %s", domain);
 }
 
 // =============================================================================
@@ -470,20 +468,15 @@ void TrafficProxy::processHTTPPacket(const uint8_t* data, uint16_t len, const ui
         }
     }
     
-#ifdef ESP32
     if (capture.postLen > 0) {
-        Serial.printf("[Proxy] HTTP: %s %s%s [%d bytes POST data]\n", 
-                      capture.method, capture.host, capture.path, capture.postLen);
-        // Log first part of POST data (may contain credentials)
-        char preview[64];
-        strncpy(preview, capture.postData, 60);
-        preview[60] = '\0';
-        if (capture.postLen > 60) strcat(preview, "...");
-        Serial.printf("[Proxy] POST: %s\n", preview);
+        LOG_D("PROXY", "HTTP: %s %s%s [%d bytes POST data]",
+              capture.method, capture.host, capture.path, capture.postLen);
+        // Log first part of POST data (may contain credentials); %.60s bounds it
+        // without a scratch buffer.
+        LOG_D("PROXY", "POST: %.60s%s", capture.postData, capture.postLen > 60 ? "..." : "");
     } else {
-        Serial.printf("[Proxy] HTTP: %s %s%s\n", capture.method, capture.host, capture.path);
+        LOG_D("PROXY", "HTTP: %s %s%s", capture.method, capture.host, capture.path);
     }
-#endif
 }
 
 // =============================================================================
@@ -516,10 +509,10 @@ bool TrafficProxy::saveDNSLog(const char* path) {
 #ifdef ESP32
     File file = SD.open(path, FILE_WRITE);
     if (!file) {
-        Serial.printf("[Proxy] Failed to open %s for writing\n", path);
+        LOG_E("PROXY", "Failed to open %s for writing", path);
         return false;
     }
-    
+
     file.println("# DNS Query Log");
     file.printf("# Total queries: %lu\n", stats_.dnsQueries);
     file.println("# Timestamp, Domain");
@@ -531,7 +524,7 @@ bool TrafficProxy::saveDNSLog(const char* path) {
     }
     
     file.close();
-    Serial.printf("[Proxy] DNS log saved to %s\n", path);
+    LOG_D("PROXY", "DNS log saved to %s", path);
     return true;
 #else
     (void)path;
@@ -543,10 +536,10 @@ bool TrafficProxy::saveHTTPCaptures(const char* path) {
 #ifdef ESP32
     File file = SD.open(path, FILE_WRITE);
     if (!file) {
-        Serial.printf("[Proxy] Failed to open %s for writing\n", path);
+        LOG_E("PROXY", "Failed to open %s for writing", path);
         return false;
     }
-    
+
     file.println("[");
     
     for (size_t i = 0; i < httpCount_; i++) {
@@ -585,7 +578,7 @@ bool TrafficProxy::saveHTTPCaptures(const char* path) {
     
     file.println("]");
     file.close();
-    Serial.printf("[Proxy] HTTP captures saved to %s\n", path);
+    LOG_D("PROXY", "HTTP captures saved to %s", path);
     return true;
 #else
     (void)path;
@@ -635,9 +628,7 @@ void TrafficProxy::registerClient(const uint8_t* mac, const uint8_t* ip) {
         }
         client.connectTime = millis();
         clientTraffic_[macStr] = client;
-#ifdef ESP32
-        Serial.printf("[Proxy] Registered client: %s\n", macStr);
-#endif
+        LOG_I("PROXY", "Registered client: %s", macStr);
     } else if (ip) {
         // Update IP if provided
         memcpy(it->second.ip, ip, 4);
@@ -656,7 +647,7 @@ bool TrafficProxy::saveClientTraffic(const char* macStr) {
 #ifdef ESP32
     auto it = clientTraffic_.find(macStr);
     if (it == clientTraffic_.end()) {
-        Serial.printf("[Proxy] Client not found: %s\n", macStr);
+        LOG_W("PROXY", "Client not found: %s", macStr);
         return false;
     }
     
@@ -678,7 +669,7 @@ bool TrafficProxy::saveClientTraffic(const char* macStr) {
     
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
-        Serial.printf("[Proxy] Failed to create %s\n", filename);
+        LOG_E("PROXY", "Failed to create %s", filename);
         return false;
     }
     
@@ -720,7 +711,7 @@ bool TrafficProxy::saveClientTraffic(const char* macStr) {
     file.print("}\n");
     
     file.close();
-    Serial.printf("[Proxy] Saved client traffic to %s\n", filename);
+    LOG_I("PROXY", "Saved client traffic to %s", filename);
     return true;
 #else
     (void)macStr;
@@ -822,14 +813,14 @@ void TrafficProxy::promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_t ty
 #endif
 
 void TrafficProxy::allocateBuffers() {
-    Serial.println("[Proxy] Allocating buffers...");
+    LOG_D("PROXY", "Allocating buffers...");
     dnsQueries_.resize(MAX_DNS_QUERIES);
     httpCaptures_.resize(MAX_HTTP_CAPTURES);
     uniqueDomains_.reserve(MAX_UNIQUE_DOMAINS);
 }
 
 void TrafficProxy::deallocateBuffers() {
-    Serial.println("[Proxy] Releasing buffers...");
+    LOG_D("PROXY", "Releasing buffers...");
     
     dnsQueries_.clear();
     dnsQueries_.shrink_to_fit();

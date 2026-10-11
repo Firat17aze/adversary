@@ -13,6 +13,7 @@
 #include <esp_wifi.h>
 #include "modules/wifi/station_scanner.h"
 #include "core/event_bus.h"
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -168,7 +169,7 @@ bool HandshakeCapture::init() {
     if (initialized_) return true;
     
 #ifdef ESP32
-    Serial.println("[Handshake] Initializing...");
+    LOG_I("HS", "Initializing...");
 #endif
     
     stats_.reset();
@@ -190,7 +191,7 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     
     if (!config.hasValidTarget()) {
 #ifdef ESP32
-        Serial.println("[Handshake] Error: No valid target BSSID");
+        LOG_W("HS", "Error: No valid target BSSID");
 #endif
         setState(HandshakeState::ERROR);
         return false;
@@ -223,8 +224,8 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     );
     
     if (discoveredClientCount_ > 0) {
-        Serial.printf("[Handshake] Using %d pre-discovered clients for targeted deauth\n", 
-                      discoveredClientCount_);
+        LOG_I("HS", "Using %d pre-discovered clients for targeted deauth",
+              discoveredClientCount_);
     }
     
     // Disconnect and reset WiFi
@@ -250,13 +251,13 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     auto filter = wifi_utils::allFrameFilter();
     wifi_utils::enablePromiscuous(promiscuousCallback, &filter);
     
-    Serial.printf("[Handshake] Started on channel %d, target: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  config_.channel,
-                  config_.targetBssid[0], config_.targetBssid[1], config_.targetBssid[2],
-                  config_.targetBssid[3], config_.targetBssid[4], config_.targetBssid[5]);
-    
+    LOG_I("HS", "Started on channel %d, target: %02X:%02X:%02X:%02X:%02X:%02X",
+          config_.channel,
+          config_.targetBssid[0], config_.targetBssid[1], config_.targetBssid[2],
+          config_.targetBssid[3], config_.targetBssid[4], config_.targetBssid[5]);
+
     if (config_.autoDeauth) {
-        Serial.printf("[Handshake] Auto-deauth enabled, will send %d deauths\n", config_.deauthCount);
+        LOG_I("HS", "Auto-deauth enabled, will send %d deauths", config_.deauthCount);
     }
 #endif
     
@@ -280,9 +281,9 @@ void HandshakeCapture::stop() {
     WiFi.mode(WIFI_OFF);
     delay(50);
     
-    Serial.println("[Handshake] Stopped");
+    LOG_I("HS", "Stopped");
 #endif
-    
+
     setState(HandshakeState::IDLE);
 }
 
@@ -301,7 +302,7 @@ void HandshakeCapture::update() {
         if (handshake_.isValid()) {
             // Got all 4 messages during grace period!
             stats_.handshakeTime = now;
-            Serial.println("[Handshake] COMPLETE! Full 4-way handshake captured (all 4 messages)!");
+            LOG_I("HS", "COMPLETE! Full 4-way handshake captured (all 4 messages)!");
             waitingForComplete_ = false;
             setState(HandshakeState::COMPLETE);
             
@@ -317,10 +318,10 @@ void HandshakeCapture::update() {
         } else {
             // Still only minimum valid - declare crackable
             stats_.handshakeTime = graceStartTime_;  // Use when we first became valid
-            Serial.println("[Handshake] Grace period expired - crackable handshake (sufficient for hashcat/aircrack-ng)");
-            Serial.printf("[Handshake] Have: M1=%d M2=%d M3=%d M4=%d\n",
-                          handshake_.hasMsg1, handshake_.hasMsg2,
-                          handshake_.hasMsg3, handshake_.hasMsg4);
+            LOG_I("HS", "Grace period expired - crackable handshake (sufficient for hashcat/aircrack-ng)");
+            LOG_D("HS", "Have: M1=%d M2=%d M3=%d M4=%d",
+                  handshake_.hasMsg1, handshake_.hasMsg2,
+                  handshake_.hasMsg3, handshake_.hasMsg4);
             waitingForComplete_ = false;
             setState(HandshakeState::CRACKABLE);
             
@@ -354,7 +355,7 @@ void HandshakeCapture::update() {
         // This gives clients time to reconnect and complete the handshake
         static const uint32_t BURST_PAUSE_MS = 10000;  // 10 seconds between bursts
         
-        uint32_t burstCycle = timeSinceDeauthStart / BURST_PAUSE_MS;
+        [[maybe_unused]] uint32_t burstCycle = timeSinceDeauthStart / BURST_PAUSE_MS;
         uint32_t timeInBurst = timeSinceDeauthStart % BURST_PAUSE_MS;
         
         // Only send during first 2.5 seconds of each burst cycle
@@ -366,8 +367,8 @@ void HandshakeCapture::update() {
             lastDeauthTime_ = now;
             
             // Log burst info
-            Serial.printf("[Handshake] Burst %lu, waiting for handshake...\n", 
-                          (unsigned long)(burstCycle + 1));
+            LOG_D("HS", "Burst %lu, waiting for handshake...",
+                  (unsigned long)(burstCycle + 1));
         }
     }
 #endif
@@ -444,11 +445,9 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
     uint16_t eapolLen = length - (eapolStart - data);
     
 #ifdef ESP32
-    Serial.printf("[Handshake] EAPOL from target BSSID, offset=%d, len=%d\n",
-                  eapolOffset, eapolLen);
-#else
-    (void)eapolOffset;
+    LOG_D("HS", "EAPOL from target BSSID, offset=%d, len=%d", eapolOffset, eapolLen);
 #endif
+    (void)eapolOffset;  // only read by the debug log above, which compiles out at INFO
     
     // Extract client MAC from frame
     uint8_t clientMac[6];
@@ -473,10 +472,10 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
     HandshakeMessage msg = identifyMessage(eapolStart, eapolLen);
     
 #ifdef ESP32
-    Serial.printf("[Handshake] EAPOL %s from %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  getMessageString(msg),
-                  clientMac[0], clientMac[1], clientMac[2],
-                  clientMac[3], clientMac[4], clientMac[5]);
+    LOG_D("HS", "EAPOL %s from %02X:%02X:%02X:%02X:%02X:%02X",
+          getMessageString(msg),
+          clientMac[0], clientMac[1], clientMac[2],
+          clientMac[3], clientMac[4], clientMac[5]);
 #endif
     
     switch (msg) {
@@ -519,7 +518,7 @@ void HandshakeCapture::setState(HandshakeState newState) {
     EventBus::getInstance().publish(event);
     
 #ifdef ESP32
-    Serial.printf("[Handshake] State: %s\n", getStateString(newState));
+    LOG_I("HS", "State: %s", getStateString(newState));
 #endif
 }
 
@@ -650,17 +649,17 @@ void HandshakeCapture::updateCaptureState() {
     // This is order-independent - we just care about having the right pieces
     
 #ifdef ESP32
-    Serial.printf("[Handshake] Have: M1=%d M2=%d M3=%d M4=%d\n",
-                  handshake_.hasMsg1, handshake_.hasMsg2,
-                  handshake_.hasMsg3, handshake_.hasMsg4);
+    LOG_D("HS", "Have: M1=%d M2=%d M3=%d M4=%d",
+          handshake_.hasMsg1, handshake_.hasMsg2,
+          handshake_.hasMsg3, handshake_.hasMsg4);
 #endif
-    
+
     // Check for complete handshake first (all 4 messages)
     // This is the full 4-way handshake - ideal capture
     if (handshake_.isValid()) {
 #ifdef ESP32
         stats_.handshakeTime = millis();
-        Serial.println("[Handshake] COMPLETE! Full 4-way handshake captured (all 4 messages)!");
+        LOG_I("HS", "COMPLETE! Full 4-way handshake captured (all 4 messages)!");
 #endif
         waitingForComplete_ = false;  // Cancel grace period
         setState(HandshakeState::COMPLETE);
@@ -680,7 +679,7 @@ void HandshakeCapture::updateCaptureState() {
     // Start grace period to wait for remaining messages (M3/M4)
     if (handshake_.isMinimumValid() && !waitingForComplete_) {
 #ifdef ESP32
-        Serial.println("[Handshake] Minimum valid reached - starting grace period for remaining messages...");
+        LOG_I("HS", "Minimum valid reached - starting grace period for remaining messages...");
         graceStartTime_ = millis();
 #endif
         waitingForComplete_ = true;
@@ -729,7 +728,7 @@ void HandshakeCapture::promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_
                 // Capture beacon if we don't have one yet
                 if (!s_instance_->handshake_.hasBeacon()) {
                     s_instance_->handshake_.setBeacon(payload, len);
-                    Serial.printf("[Handshake] Captured beacon frame (%d bytes)\n", len);
+                    LOG_D("HS", "Captured beacon frame (%d bytes)", len);
                 }
             }
         }
@@ -753,9 +752,9 @@ void HandshakeCapture::sendDeauth() {
         if (DeauthAttack::sendSingleDeauth(config_.targetBssid, discoveredClients_[i],
                                            DeauthReason::CLASS3_FRAME_FROM_NONASSOC, true)) {
             stats_.deauthsSent += 2;  // Count both deauth and disassoc
-            Serial.printf("[Handshake] Sent targeted deauth+disassoc to %02X:%02X:%02X:%02X:%02X:%02X\n",
-                          discoveredClients_[i][0], discoveredClients_[i][1], discoveredClients_[i][2],
-                          discoveredClients_[i][3], discoveredClients_[i][4], discoveredClients_[i][5]);
+            LOG_D("HS", "Sent targeted deauth+disassoc to %02X:%02X:%02X:%02X:%02X:%02X",
+                  discoveredClients_[i][0], discoveredClients_[i][1], discoveredClients_[i][2],
+                  discoveredClients_[i][3], discoveredClients_[i][4], discoveredClients_[i][5]);
         }
     }
     
@@ -764,11 +763,11 @@ void HandshakeCapture::sendDeauth() {
                                        DeauthReason::CLASS3_FRAME_FROM_NONASSOC, true)) {
         stats_.deauthsSent += 2;
         if (discoveredClientCount_ == 0) {
-            Serial.printf("[Handshake] Sent deauth+disassoc broadcast (%lu/%d)\n", 
-                          (unsigned long)(deauthBurstCount_ + 1), config_.deauthCount);
+            LOG_D("HS", "Sent deauth+disassoc broadcast (%lu/%d)",
+                  (unsigned long)(deauthBurstCount_ + 1), config_.deauthCount);
         }
     } else {
-        Serial.println("[Handshake] Deauth TX failed");
+        LOG_W("HS", "Deauth TX failed");
     }
 #endif
 }
@@ -786,9 +785,9 @@ void HandshakeCapture::addDiscoveredClient(const uint8_t* clientMac) {
         memcpy(discoveredClients_[discoveredClientCount_], clientMac, 6);
         discoveredClientCount_++;
 #ifdef ESP32
-        Serial.printf("[Handshake] Discovered client: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                      clientMac[0], clientMac[1], clientMac[2],
-                      clientMac[3], clientMac[4], clientMac[5]);
+        LOG_D("HS", "Discovered client: %02X:%02X:%02X:%02X:%02X:%02X",
+              clientMac[0], clientMac[1], clientMac[2],
+              clientMac[3], clientMac[4], clientMac[5]);
 #endif
     }
 }
@@ -801,7 +800,7 @@ void HandshakeCapture::checkTimeout() {
 #ifdef ESP32
     uint32_t elapsed = millis() - stats_.captureStartTime;
     if (elapsed >= config_.timeoutMs) {
-        Serial.println("[Handshake] Timeout reached");
+        LOG_I("HS", "Timeout reached");
         setState(HandshakeState::TIMEOUT);
     }
 #endif
@@ -869,7 +868,7 @@ void HandshakeCapture::extractPMKID(const uint8_t* keyData, uint16_t keyDataLen)
                 // Get our own MAC as station MAC
                 esp_wifi_get_mac(WIFI_IF_STA, pmkid_.staMac);
                 
-                Serial.printf("[Handshake] PMKID captured! %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\n",
+                LOG_I("HS", "PMKID captured! %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
                     pmkid_.pmkid[0], pmkid_.pmkid[1], pmkid_.pmkid[2], pmkid_.pmkid[3],
                     pmkid_.pmkid[4], pmkid_.pmkid[5], pmkid_.pmkid[6], pmkid_.pmkid[7],
                     pmkid_.pmkid[8], pmkid_.pmkid[9], pmkid_.pmkid[10], pmkid_.pmkid[11],

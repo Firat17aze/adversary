@@ -14,6 +14,7 @@
 #include <ArduinoJson.h>
 #include <esp_wifi.h>
 #include <esp_ota_ops.h>
+#include "utils/log.h"
 #endif
 
 #include "../../config/config.h"
@@ -39,19 +40,19 @@ bool ServerManager::start() {
     if (running_) return true;
 
 #ifdef ESP32
-    Serial.println("[Server] Starting server mode...");
+    LOG_I("SERVER", "Starting server mode...");
 
     if (!setupAP()) {
-        Serial.println("[Server] ERROR: AP setup failed");
+        LOG_E("SERVER", "AP setup failed");
         return false;
     }
 
     if (!setupMDNS()) {
-        Serial.println("[Server] WARNING: mDNS setup failed");
+        LOG_W("SERVER", "mDNS setup failed");
     }
 
     if (!setupWebServer()) {
-        Serial.println("[Server] ERROR: WebServer setup failed");
+        LOG_E("SERVER", "WebServer setup failed");
         stop();
         return false;
     }
@@ -60,9 +61,9 @@ bool ServerManager::start() {
     requestCount_ = 0;
     lastRequestTime_ = 0;
     running_ = true;
-    Serial.printf("[Server] Ready at http://%s.local or http://%s\n", 
-                  SettingsManager::getInstance().get().system.deviceName,
-                  getIPAddress());
+    LOG_I("SERVER", "Ready at http://%s.local or http://%s",
+          SettingsManager::getInstance().get().system.deviceName,
+          getIPAddress());
 #endif
     
     return true;
@@ -72,7 +73,7 @@ void ServerManager::stop() {
     if (!running_) return;
 
 #ifdef ESP32
-    Serial.println("[Server] Stopping server mode...");
+    LOG_I("SERVER", "Stopping server mode...");
 
     if (server_) {
         server_->stop();
@@ -300,7 +301,7 @@ void ServerManager::handleNotFound() {
     // Reject path traversal before joining to the dashboard base dir, otherwise
     // "/../config/settings.json" etc. would escape and read arbitrary SD files.
     if (!path_security::isSafeWebPath(path.c_str())) {
-        Serial.printf("[Server] Rejected unsafe path: %s\n", path.c_str());
+        LOG_W("SERVER", "Rejected unsafe path: %s", path.c_str());
         server_->send(400, "text/plain", "Bad Request");
         return;
     }
@@ -353,7 +354,7 @@ void ServerManager::handleNotFound() {
     // Captive portal / connectivity check - show login page if auth enabled, else redirect to root
     auto& settings = SettingsManager::getInstance().get();
     String host = server_->hostHeader();
-    Serial.printf("[Server] Captive portal: %s (Host: %s)\n", uri.c_str(), host.c_str());
+    LOG_D("SERVER", "Captive portal: %s (Host: %s)", uri.c_str(), host.c_str());
     
     if (settings.system.dashboardAuthEnabled) {
         // Serve login landing page
@@ -635,7 +636,7 @@ void ServerManager::handleApiHandshakeDetail() {
     String pcapName = filename + ".pcap";
     const HandshakeMetadata* meta = CaptureRegistry::getInstance().getMetadata(pcapName.c_str());
     if (!meta) {
-        Serial.printf("[Server] Detail not in manifest: %s\n", filename.c_str());
+        LOG_D("SERVER", "Detail not in manifest: %s", filename.c_str());
         server_->send(404, "application/json", "{\"error\":\"Not found\"}");
         return;
     }
@@ -702,7 +703,7 @@ void ServerManager::handleApiWardrivingDetail() {
     String fullPath = String(config::SD_WARDRIVING_PATH) + "/" + filename;
     
     if (!SD.exists(fullPath)) {
-        Serial.printf("[Server] Wardriving 404: %s\n", fullPath.c_str());
+        LOG_D("SERVER", "Wardriving 404: %s", fullPath.c_str());
         server_->send(404, "application/json", "{\"error\":\"File not found\"}");
         return;
     }
