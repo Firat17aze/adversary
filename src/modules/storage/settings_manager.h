@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <SD.h>
+#include "utils/log.h"
 #if defined(TARGET_M5STICK)
 #include <LittleFS.h>
 #endif
@@ -360,17 +361,17 @@ private:
 
 inline bool SettingsManager::load() {
 #ifdef ESP32
-    Serial.println("[Settings] Loading configuration...");
+    LOG_I("SETTINGS", "Loading configuration...");
     
 #if defined(TARGET_M5STICK)
     // M5Stick uses LittleFS
     if (!LittleFS.begin(true)) {
-        Serial.println("[Settings] LittleFS mount failed");
+        LOG_E("SETTINGS", "LittleFS mount failed");
         return createDefaultConfig();
     }
     
     if (!LittleFS.exists(CONFIG_PATH)) {
-        Serial.println("[Settings] Config not found, creating defaults...");
+        LOG_W("SETTINGS", "Config not found, creating defaults...");
         return createDefaultConfig();
     }
     
@@ -379,14 +380,14 @@ inline bool SettingsManager::load() {
     // Cardputer uses SD
     // Check if config file exists
     if (!SD.exists(CONFIG_PATH)) {
-        Serial.println("[Settings] Config not found, creating defaults...");
+        LOG_W("SETTINGS", "Config not found, creating defaults...");
         return createDefaultConfig();
     }
     
     File file = SD.open(CONFIG_PATH, FILE_READ);
 #endif
     if (!file) {
-        Serial.println("[Settings] Failed to open config file");
+        LOG_E("SETTINGS", "Failed to open config file");
         return createDefaultConfig();
     }
     
@@ -399,7 +400,7 @@ inline bool SettingsManager::load() {
     file.close();
 
     if (error) {
-        Serial.printf("[Settings] JSON parse error: %s\n", error.c_str());
+        LOG_E("SETTINGS", "JSON parse error: %s", error.c_str());
         return createDefaultConfig();
     }
 
@@ -526,7 +527,7 @@ inline bool SettingsManager::load() {
 
 inline bool SettingsManager::save() {
 #ifdef ESP32
-    Serial.println("[Settings] Saving configuration...");
+    LOG_I("SETTINGS", "Saving configuration...");
     
 #if defined(TARGET_M5STICK)
     // M5Stick uses LittleFS
@@ -546,7 +547,7 @@ inline bool SettingsManager::save() {
     File file = SD.open(CONFIG_PATH, FILE_WRITE);
 #endif
     if (!file) {
-        Serial.println("[Settings] Failed to open config for writing");
+        LOG_E("SETTINGS", "Failed to open config for writing");
         return false;
     }
     
@@ -646,7 +647,7 @@ inline void SettingsManager::reset() {
     settings_ = Settings();  // Reset to defaults
     dirty_ = true;
 #ifdef ESP32
-    Serial.println("[Settings] Reset to defaults");
+    LOG_I("SETTINGS", "Reset to defaults");
 #endif
 }
 
@@ -658,18 +659,18 @@ inline bool SettingsManager::createDefaultConfig() {
 
 inline bool SettingsManager::loadWhitelist() {
 #ifdef ESP32
-    Serial.println("[Settings] Loading whitelist...");
+    LOG_I("SETTINGS", "Loading whitelist...");
     
     whitelist_.clear();
     
     if (!SD.exists(WHITELIST_PATH)) {
-        Serial.println("[Settings] Whitelist not found, creating empty...");
+        LOG_W("SETTINGS", "Whitelist not found, creating empty...");
         return createDefaultWhitelist();
     }
     
     File file = SD.open(WHITELIST_PATH, FILE_READ);
     if (!file) {
-        Serial.println("[Settings] Failed to open whitelist");
+        LOG_E("SETTINGS", "Failed to open whitelist");
         return createDefaultWhitelist();
     }
     
@@ -678,7 +679,7 @@ inline bool SettingsManager::loadWhitelist() {
     file.close();
     
     if (error) {
-        Serial.printf("[Settings] Whitelist parse error: %s\n", error.c_str());
+        LOG_E("SETTINGS", "Whitelist parse error: %s", error.c_str());
         return createDefaultWhitelist();
     }
     
@@ -711,7 +712,7 @@ inline bool SettingsManager::loadWhitelist() {
         }
     }
     
-    Serial.printf("[Settings] Loaded %d whitelist entries\n", (int)whitelist_.size());
+    LOG_I("SETTINGS", "Loaded %d whitelist entries", (int)whitelist_.size());
     return true;
 #else
     return true;
@@ -720,7 +721,7 @@ inline bool SettingsManager::loadWhitelist() {
 
 inline bool SettingsManager::saveWhitelist() {
 #ifdef ESP32
-    Serial.println("[Settings] Saving whitelist...");
+    LOG_I("SETTINGS", "Saving whitelist...");
     
     if (!SD.exists("/adversary/config")) {
         SD.mkdir("/adversary/config");
@@ -728,7 +729,7 @@ inline bool SettingsManager::saveWhitelist() {
     
     File file = SD.open(WHITELIST_PATH, FILE_WRITE);
     if (!file) {
-        Serial.println("[Settings] Failed to open whitelist for writing");
+        LOG_E("SETTINGS", "Failed to open whitelist for writing");
         return false;
     }
     
@@ -751,7 +752,7 @@ inline bool SettingsManager::saveWhitelist() {
     serializeJsonPretty(doc, file);
     file.close();
     
-    Serial.printf("[Settings] Saved %d whitelist entries\n", (int)whitelist_.size());
+    LOG_I("SETTINGS", "Saved %d whitelist entries", (int)whitelist_.size());
     return true;
 #else
     return true;
@@ -803,13 +804,13 @@ inline void SettingsManager::checkApiKeyFile() {
     }
     
     if (len == 0) {
-        Serial.println("[Settings] WPA-SEC key file is empty");
+        LOG_W("SETTINGS", "WPA-SEC key file is empty");
         return;
     }
     
     // Check if key changed
     if (strcmp(settings_.apiKeys.wpasec, newKey) != 0) {
-        Serial.printf("[Settings] Importing WPA-SEC key (%u chars)\n", (unsigned)strlen(newKey));
+        LOG_I("SETTINGS", "Importing WPA-SEC key (%u chars)", (unsigned)strlen(newKey));
         setWpaSecKey(newKey);
         save();
     }
@@ -820,7 +821,7 @@ inline void SettingsManager::checkApiKeyFile() {
 #else
     SD.remove(WPASEC_KEY_FILE);
 #endif
-    Serial.println("[Settings] WPA-SEC key file imported and deleted");
+    LOG_I("SETTINGS", "WPA-SEC key file imported and deleted");
     
     // --- WiGLE key file ---
     static constexpr const char* WIGLE_KEY_FILE = "/adversary/config/wigle.txt";
@@ -843,7 +844,7 @@ inline void SettingsManager::checkApiKeyFile() {
             }
             
             if (wlen > 0 && strcmp(settings_.apiKeys.wigle, wigleKey) != 0) {
-                Serial.printf("[Settings] Importing WiGLE key (%u chars)\n", (unsigned)strlen(wigleKey));
+                LOG_I("SETTINGS", "Importing WiGLE key (%u chars)", (unsigned)strlen(wigleKey));
                 setWigleKey(wigleKey);
                 save();
             }
@@ -853,7 +854,7 @@ inline void SettingsManager::checkApiKeyFile() {
 #else
             SD.remove(WIGLE_KEY_FILE);
 #endif
-            Serial.println("[Settings] WiGLE key file imported and deleted");
+            LOG_I("SETTINGS", "WiGLE key file imported and deleted");
         }
     }
 
@@ -878,7 +879,7 @@ inline void SettingsManager::checkApiKeyFile() {
             }
 
             if (plen > 0 && strcmp(settings_.apiKeys.pwncrack, pwncrackKey) != 0) {
-                Serial.printf("[Settings] Importing pwncrack key (%u chars)\n", (unsigned)strlen(pwncrackKey));
+                LOG_I("SETTINGS", "Importing pwncrack key (%u chars)", (unsigned)strlen(pwncrackKey));
                 setPwncrackKey(pwncrackKey);
                 save();
             }
@@ -888,7 +889,7 @@ inline void SettingsManager::checkApiKeyFile() {
 #else
             SD.remove(PWNCRACK_KEY_FILE);
 #endif
-            Serial.println("[Settings] pwncrack key file imported and deleted");
+            LOG_I("SETTINGS", "pwncrack key file imported and deleted");
         }
     }
 

@@ -5,6 +5,7 @@
 
 #include "rfid_writer.h"
 #include "rfid_reselect.h"
+#include "utils/log.h"
 
 #include <cstring>
 
@@ -77,7 +78,7 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
         return result;
     }
     if (!selectCard()) {
-        Serial.println("[RFID] Write Error: card not responding to WUPA");
+        LOG_W("RFID", "write: card not responding to WUPA");
         return result;
     }
     result.cardSelected = true;
@@ -97,14 +98,14 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
             selectCard();
             sectorAuthed = authBlock(dump, item.sector, item.addr);
             if (!sectorAuthed) {
-                Serial.printf("[RFID] Write: sector %d auth failed\n", item.sector);
+                LOG_W("RFID", "write: sector %d auth failed", item.sector);
             }
         }
 
         if (!sectorAuthed) {
             result.failedAuth++;
-            Serial.printf("[RFID] Write: block %d skipped (sector %d not authenticated)\n",
-                          item.addr, item.sector);
+            LOG_D("RFID", "write: block %d skipped (sector %d not authenticated)",
+                  item.addr, item.sector);
         } else {
             byte buffer[MIFARE_BLOCK_SIZE];
             memcpy(buffer, item.bytes, MIFARE_BLOCK_SIZE);
@@ -125,19 +126,19 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
                 status =
                     (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Write(item.addr, buffer, MIFARE_BLOCK_SIZE);
                 if (status == MFRC522_I2C::STATUS_OK) break;
-                Serial.printf("[RFID] Write: block %d attempt %d/%d NAK (status %d)\n",
-                              item.addr, attempt + 1, WRITE_ATTEMPTS, status);
+                LOG_D("RFID", "write: block %d attempt %d/%d NAK (status %d)",
+                      item.addr, attempt + 1, WRITE_ATTEMPTS, status);
             }
             if (status == MFRC522_I2C::STATUS_OK) {
                 result.blocksWritten++;
             } else if (!sectorAuthed) {
                 result.failedAuth++;
-                Serial.printf("[RFID] Write: block %d lost sector %d auth on retry\n",
-                              item.addr, item.sector);
+                LOG_W("RFID", "write: block %d lost sector %d auth on retry",
+                      item.addr, item.sector);
             } else {
                 result.failedWrite++;
-                Serial.printf("[RFID] Write: block %d NAK after %d attempts (status %d)\n",
-                              item.addr, WRITE_ATTEMPTS, status);
+                LOG_W("RFID", "write: block %d NAK after %d attempts (status %d)",
+                      item.addr, WRITE_ATTEMPTS, status);
             }
         }
         done++;
@@ -202,9 +203,9 @@ WriteResult RfidWriter::restore(const WritePlan& plan, const NfcDump& dump, bool
     // Report the data-block tally against the data-block denominator only: totalPlanned folds in the
     // +1 UID step, so pairing it with blocksWritten (data-only) read as an off-by-one (47/48) on a
     // full clone. The UID outcome is a separate concern and is carried by uidResult, not this count.
-    Serial.printf("[RFID] Write done: %d/%d data blocks, %d auth-fail, %d write-fail. %s\n",
-                  result.blocksWritten, static_cast<int>(plan.dataWrites.size()), result.failedAuth,
-                  result.failedWrite, result.uidResult.c_str());
+    LOG_I("RFID", "Write done: %d/%d data blocks, %d auth-fail, %d write-fail. %s",
+          result.blocksWritten, static_cast<int>(plan.dataWrites.size()), result.failedAuth,
+          result.failedWrite, result.uidResult.c_str());
     return result;
 }
 

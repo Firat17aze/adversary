@@ -6,6 +6,7 @@
 #include "rfid_audit.h"
 #include "rfid_reselect.h"
 #include <SD.h>
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -169,7 +170,7 @@ int RfidAudit::runDictionaryAttack(
     // SAK 0x20 is ISO 14443-4 (DESFire, Phone, etc) and DOES NOT support MIFARE Classic AUTH commands.
     uint8_t sak = m_rfid->uid.sak;
     if (sak & 0x20) {
-        Serial.printf("[RFID] Audit Error: Incompatible tag type (SAK: 0x%02X). ISO 14443-4 not supported for MIFARE audit.\n", sak);
+        LOG_W("RFID", "incompatible tag type (SAK: 0x%02X); ISO 14443-4 not supported for MIFARE audit", sak);
         return -1; // Specific error code for incompatible type
     }
     int keysFound = 0;
@@ -182,7 +183,7 @@ int RfidAudit::runDictionaryAttack(
     bool selected = reselectCard(m_rfid);
 
     if (!selected) {
-        Serial.println("[RFID] Audit Error: Card not responding to WUPA");
+        LOG_W("RFID", "audit: card not responding to WUPA");
         return 0;
     }
 
@@ -215,7 +216,7 @@ int RfidAudit::runDictionaryAttack(
             memcpy(currentKey, DEFAULT_KEYS[k], 6);
             
             if (tryKey(firstBlock, currentKey, true)) {
-                Serial.printf("[RFID] Sector %d: Key A FOUND (key idx %d)\n", s, k);
+                LOG_D("RFID", "sector %d: Key A FOUND (key idx %d)", s, (int)k);
                 sectorData.keyAFound = true;
                 sectorData.keyAIndex = k;  // Store which key matched
                 memcpy(sectorData.keyA, currentKey, 6);
@@ -241,7 +242,7 @@ int RfidAudit::runDictionaryAttack(
         // OPTIMIZATION: If Key A was found, try it as Key B first (often they're identical)
         if (sectorData.keyAFound) {
             if (tryKey(firstBlock, sectorData.keyA, false)) {
-                Serial.printf("[RFID] Sector %d: Key B FOUND (same as Key A, idx %d)\n", s, sectorData.keyAIndex);
+                LOG_D("RFID", "sector %d: Key B FOUND (same as Key A, idx %d)", s, sectorData.keyAIndex);
                 sectorData.keyBFound = true;
                 sectorData.keyBIndex = sectorData.keyAIndex;  // Same key as A
                 memcpy(sectorData.keyB, sectorData.keyA, 6);
@@ -260,7 +261,7 @@ int RfidAudit::runDictionaryAttack(
                 memcpy(currentKey, DEFAULT_KEYS[k], 6);
                 
                 if (tryKey(firstBlock, currentKey, false)) {
-                    Serial.printf("[RFID] Sector %d: Key B FOUND (key idx %d)\n", s, k);
+                    LOG_D("RFID", "sector %d: Key B FOUND (key idx %d)", s, (int)k);
                     sectorData.keyBFound = true;
                     sectorData.keyBIndex = k;  // Store which key matched
                     memcpy(sectorData.keyB, currentKey, 6);
@@ -307,8 +308,8 @@ int RfidAudit::runDictionaryAttack(
             if (authStatus != MFRC522_I2C::STATUS_OK) {
                 // The whole sector will not authenticate for reading despite a cracked key -- leave
                 // all four blockRead flags false (saveToSD emits '??') and say so once (slice-0045/0046).
-                Serial.printf("[RFID] Sector %d: AUTH FAILED for read with cracked key (status %d) -> 4x ?? in dump\n",
-                              s, authStatus);
+                LOG_W("RFID", "Sector %d: AUTH FAILED for read with cracked key (status %d) -> 4x ?? in dump",
+                      s, authStatus);
             } else {
                 for (int block = 0; block < 4; block++) {
                     uint8_t blockAddr = firstBlock + block;
@@ -325,8 +326,8 @@ int RfidAudit::runDictionaryAttack(
                         // Auth held for the sector but this block would not read back. Fail loud
                         // with the status so a '??' here is a read miss, not a key miss (slice-0045).
                         // blockRead[block] stays false.
-                        Serial.printf("[RFID] Sector %d block %d: READ FAILED (auth OK, MIFARE_Read status %d) -> ?? in dump\n",
-                                      s, blockAddr, readStatus);
+                        LOG_W("RFID", "Sector %d block %d: READ FAILED (auth OK, MIFARE_Read status %d) -> ?? in dump",
+                              s, blockAddr, readStatus);
                     }
                 }
             }
@@ -338,13 +339,13 @@ int RfidAudit::runDictionaryAttack(
             // No dictionary key for this sector, so it is omitted from the dump entirely (the block
             // read above is gated on a key). Say so loudly rather than leaving a silent gap -- this
             // is the dominant cause of missing sectors on a card with non-default keys (slice-0045).
-            Serial.printf("[RFID] Sector %d: no dictionary key found -> omitted from dump (4 data blocks unreadable, keys unknown)\n", s);
+            LOG_W("RFID", "Sector %d: no dictionary key found -> omitted from dump (4 data blocks unreadable, keys unknown)", s);
         }
         
         // Debug: sector summary
-        Serial.printf("[RFID] Sector %d done: A=%s B=%s\n", s, 
-            sectorData.keyAFound ? "Y" : "N", 
-            sectorData.keyBFound ? "Y" : "N");
+        LOG_D("RFID", "sector %d done: A=%s B=%s", s,
+              sectorData.keyAFound ? "Y" : "N",
+              sectorData.keyBFound ? "Y" : "N");
         
         m_results.push_back(sectorData);
     }

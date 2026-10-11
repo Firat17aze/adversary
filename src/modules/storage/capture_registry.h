@@ -15,6 +15,7 @@
 #include "handshake_record.h"
 #include "utils/filename_utils.h"
 #include <functional>
+#include "utils/log.h"
 
 #ifndef ESP32
 #include "../../test/common/arduino_mocks.h"
@@ -390,12 +391,12 @@ inline void CaptureRegistry::clearAll() {
     summaries_.clear();
     summaries_.shrink_to_fit();
     metadataSlot_ = HandshakeMetadata();
-    Serial.println("[CaptureRegistry] All SSIDs and summaries cleared (RAM freed)");
+    LOG_D("CAPREG", "all SSIDs and summaries cleared (RAM freed)");
 }
 
 inline void CaptureRegistry::scanAll() {
 #ifdef ESP32
-    Serial.println("[CaptureRegistry] Scanning capture directories...");
+    LOG_I("CAPREG", "Scanning capture directories...");
     uint32_t start = millis();
     
     clearAll();
@@ -410,8 +411,8 @@ inline void CaptureRegistry::scanAll() {
     scanCredentialsDirectory();
 
     uint32_t elapsed = millis() - start;
-    Serial.printf("[CaptureRegistry] Found %zu handshakes, %zu credentials in %lu ms\n",
-                  summaries_.size(), credentialSSIDs_.size(), elapsed);
+    LOG_I("CAPREG", "Found %zu handshakes, %zu credentials in %lu ms",
+          summaries_.size(), credentialSSIDs_.size(), elapsed);
 #endif
 }
 
@@ -419,7 +420,7 @@ inline void CaptureRegistry::scanHandshakesDirectory() {
 #ifdef ESP32
     File dir = SD.open(config::SD_HANDSHAKES_PATH);
     if (!dir || !dir.isDirectory()) {
-        Serial.printf("[CaptureRegistry] Cannot open: %s\n", config::SD_HANDSHAKES_PATH);
+        LOG_W("CAPREG", "cannot open: %s", config::SD_HANDSHAKES_PATH);
         return;
     }
     
@@ -641,7 +642,7 @@ inline void CaptureRegistry::addHandshake(const char* ssid,
         memcpy(summary->bssid, metadata->bssid, 6);
         persistRecordFromMetadata(*summary, *metadata);
     }
-    Serial.printf("[CaptureRegistry] Added handshake: %s\n", ssid);
+    LOG_I("CAPREG", "Added handshake: %s", ssid);
 #endif
 }
 
@@ -649,7 +650,7 @@ inline void CaptureRegistry::addCredentials(const char* ssid) {
     if (ssid && ssid[0] != '\0') {
         credentialSSIDs_.push_back(ssid);
 #ifdef ESP32
-        Serial.printf("[CaptureRegistry] Added credentials: %s\n", ssid);
+        LOG_I("CAPREG", "Added credentials: %s", ssid);
 #endif
     }
 }
@@ -671,7 +672,7 @@ inline void CaptureRegistry::removeHandshake(const char* ssid) {
                 }
             }
             summaries_.erase(it);
-            Serial.printf("[CaptureRegistry] Removed handshake: %s\n", ssid);
+            LOG_I("CAPREG", "Removed handshake: %s", ssid);
             return;
         }
     }
@@ -698,7 +699,7 @@ inline bool CaptureRegistry::openManifest() {
     if (!manifestReady_) {
         // Bad header / corrupt: discard and recreate. No migration — the
         // .pcap files remain the ground truth; statuses repopulate on re-upload.
-        Serial.println("[CaptureRegistry] manifest.bin invalid; recreating");
+        LOG_W("CAPREG", "manifest.bin invalid; recreating");
         SD.remove(manifestPath);
         manifestReady_ = manifest_.open(manifestPath);
     }
@@ -733,7 +734,7 @@ inline int CaptureRegistry::loadFromManifest() {
         summaries_.push_back(s);
         loaded++;
     });
-    Serial.printf("[CaptureRegistry] Hydrated %d records from manifest.bin (%u total)\n", loaded, n);
+    LOG_I("CAPREG", "Hydrated %d records from manifest.bin (%u total)", loaded, n);
     return loaded;
 #else
     return 0;
@@ -751,8 +752,8 @@ inline void CaptureRegistry::hydrateAndReconcile() {
     uint32_t total = manifest_.count();
     uint32_t dead = (total > (uint32_t)loaded) ? total - (uint32_t)loaded : 0;
     if (dead >= COMPACT_DEAD_THRESHOLD && manifest_.compact()) {
-        Serial.printf("[CaptureRegistry] Compacted manifest: dropped %u dead (%u -> %u records)\n",
-                      dead, total, manifest_.count());
+        LOG_I("CAPREG", "Compacted manifest: dropped %u dead (%u -> %u records)",
+              dead, total, manifest_.count());
         summaries_.clear();
         loaded = loadFromManifest();
     }
@@ -768,8 +769,8 @@ inline void CaptureRegistry::hydrateAndReconcile() {
 
     if (manifest_.isAuthoritative()) {
         // The manifest already indexes every .pcap — skip the ~19s FAT scan.
-        Serial.printf("[CaptureRegistry] Manifest authoritative (%zu); skipping .pcap dir scan\n",
-                      summaries_.size());
+        LOG_I("CAPREG", "Manifest authoritative (%zu); skipping .pcap dir scan",
+              summaries_.size());
         return;
     }
 
@@ -780,8 +781,8 @@ inline void CaptureRegistry::hydrateAndReconcile() {
     scanHandshakesDirectory();
     int orphans = persistDeferredOrphans();
     if (manifest_.markAuthoritative()) {
-        Serial.printf("[CaptureRegistry] Reconciled %d orphan .pcap into manifest; now authoritative\n",
-                      orphans);
+        LOG_I("CAPREG", "Reconciled %d orphan .pcap into manifest; now authoritative",
+              orphans);
     }
 #endif
 }
@@ -819,7 +820,7 @@ inline int CaptureRegistry::persistDeferredOrphans() {
 
 inline int CaptureRegistry::rebuildIndex() {
 #ifdef ESP32
-    Serial.println("[CaptureRegistry] rebuildIndex: re-syncing manifest with .pcap dir");
+    LOG_I("CAPREG", "rebuildIndex: re-syncing manifest with .pcap dir");
 
     clearAll();
     openManifest();
@@ -858,8 +859,8 @@ inline int CaptureRegistry::rebuildIndex() {
     }
     manifest_.markAuthoritative();
 
-    Serial.printf("[CaptureRegistry] rebuildIndex: +%d added, -%d pruned, %zu total\n",
-                  added, pruned, summaries_.size());
+    LOG_I("CAPREG", "rebuildIndex: +%d added, -%d pruned, %zu total",
+          added, pruned, summaries_.size());
     return static_cast<int>(summaries_.size());
 #else
     return 0;
@@ -911,8 +912,8 @@ inline bool CaptureRegistry::persistRecordFromMetadata(HandshakeSummary& summary
     if (summary.recIndex != NO_RECORD) {
         // Overwrite the existing slot in place (the hot path for re-capture).
         bool ok = manifest_.writeAt(summary.recIndex, rec);
-        Serial.printf("[CaptureRegistry] Record updated idx=%u ssid=%s ch=%u type=%u\n",
-                      summary.recIndex, rec.ssid, rec.channel, rec.type);
+        LOG_D("CAPREG", "Record updated idx=%u ssid=%s ch=%u type=%u",
+              summary.recIndex, rec.ssid, rec.channel, rec.type);
         return ok;
     }
 
@@ -920,8 +921,8 @@ inline bool CaptureRegistry::persistRecordFromMetadata(HandshakeSummary& summary
     uint32_t idx = 0;
     if (!manifest_.append(rec, &idx)) return false;
     summary.recIndex = static_cast<uint16_t>(idx);
-    Serial.printf("[CaptureRegistry] Record appended idx=%u ssid=%s ch=%u type=%u\n",
-                  idx, rec.ssid, rec.channel, rec.type);
+    LOG_D("CAPREG", "Record appended idx=%u ssid=%s ch=%u type=%u",
+          idx, rec.ssid, rec.channel, rec.type);
     return true;
 #else
     (void)summary; (void)m;
@@ -968,7 +969,7 @@ inline bool CaptureRegistry::setCrackedPassword(const uint8_t bssid[6],
         }
     }
     if (!summary) {
-        Serial.printf("[CaptureRegistry] Cracked result unmatched: %s\n", ssid);
+        LOG_W("CAPREG", "Cracked result unmatched: %s", ssid);
         return false;
     }
 
@@ -1062,7 +1063,7 @@ inline bool CaptureRegistry::setPwncrackCrackedPassword(const uint8_t bssid[6],
         }
     }
     if (!summary) {
-        Serial.printf("[CaptureRegistry] pwncrack result unmatched: %s\n", ssid);
+        LOG_W("CAPREG", "pwncrack result unmatched: %s", ssid);
         return false;
     }
 

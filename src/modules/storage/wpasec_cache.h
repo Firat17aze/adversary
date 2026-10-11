@@ -19,6 +19,7 @@
 #include <SD.h>
 #include <ArduinoJson.h>
 #include <map>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -62,7 +63,7 @@ public:
         // Force std::map to release memory
         std::map<String, WpaSecCacheEntry>().swap(cache_);
         size_t heapAfter = ESP.getFreeHeap();
-        Serial.printf("[WpaSecCache] Cleared for SSL: freed %d bytes\n", (int)(heapAfter - heapBefore));
+        LOG_D("WPACACHE", "Cleared for SSL: freed %d bytes", (int)(heapAfter - heapBefore));
 #endif
     }
     
@@ -75,13 +76,13 @@ public:
         cache_.clear();
         
         if (!SD.exists(CACHE_PATH)) {
-            Serial.println("[WpaSecCache] No cache file, starting fresh");
+            LOG_W("WPACACHE", "no cache file, starting fresh");
             return 0;
         }
         
         File file = SD.open(CACHE_PATH, FILE_READ);
         if (!file) {
-            Serial.println("[WpaSecCache] Failed to open cache file");
+            LOG_E("WPACACHE", "Failed to open cache file");
             return 0;
         }
         
@@ -90,8 +91,7 @@ public:
         size_t freeHeap = ESP.getFreeHeap();
         if (freeHeap < 25000) {  // ~25KB headroom for a ~60-entry cache parse
             file.close();
-            Serial.printf("[WpaSecCache] Low heap at boot: %u bytes - skipping cache load\n", freeHeap);
-            Serial.println("[WpaSecCache] Cache will be rebuilt from uploads/refreshes");
+            LOG_W("WPACACHE", "low heap at boot: %u bytes - skipping cache load; will rebuild from uploads/refreshes", freeHeap);
             return 0;
         }
 
@@ -100,8 +100,7 @@ public:
         file.close();
         
         if (err) {
-            Serial.printf("[WpaSecCache] JSON parse error: %s (heap: %u)\n", err.c_str(), freeHeap);
-            Serial.println("[WpaSecCache] Cache will be rebuilt from uploads/refreshes");
+            LOG_E("WPACACHE", "JSON parse error: %s (heap: %u); will rebuild from uploads/refreshes", err.c_str(), freeHeap);
             return 0;
         }
         
@@ -121,7 +120,7 @@ public:
             cache_[String(ssid)] = e;
         }
         
-        Serial.printf("[WpaSecCache] Loaded %d entries\n", cache_.size());
+        LOG_I("WPACACHE", "Loaded %d entries", (int)cache_.size());
         return cache_.size();
 #else
         return 0;
@@ -147,14 +146,14 @@ public:
         
         File file = SD.open(CACHE_PATH, FILE_WRITE);
         if (!file) {
-            Serial.println("[WpaSecCache] Failed to open cache for write");
+            LOG_E("WPACACHE", "Failed to open cache for write");
             return false;
         }
         
         serializeJson(doc, file);
         file.close();
         
-        Serial.printf("[WpaSecCache] Saved %d entries\n", cache_.size());
+        LOG_I("WPACACHE", "Saved %d entries", (int)cache_.size());
         return true;
 #else
         return false;
@@ -240,7 +239,7 @@ public:
         if (it != cache_.end()) {
             cache_.erase(it);
             dirty_ = true;
-            Serial.printf("[WpaSecCache] Removed entry: %s\n", ssid);
+            LOG_D("WPACACHE", "Removed entry: %s", ssid);
             return true;
         }
 #else

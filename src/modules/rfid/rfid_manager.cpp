@@ -9,6 +9,7 @@
 #include "rfid_manager.h"
 #include "config/pins.h"
 #include "core/event_bus.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -23,7 +24,7 @@ RFIDManager::RFIDManager()
 bool RFIDManager::init() {
     if (m_detected) return true;
 
-    Serial.println("[RFID] Initializing WS1850S (I2C 0x28)...");
+    LOG_I("RFID", "Initializing WS1850S (I2C 0x28)...");
     
     // RFID2 unit uses I2C. On Cardputer Port A Grove uses pins 2 (SDA) and 1 (SCL)
     // We must ensure Wire is initialized on these pins if we use Grove.
@@ -43,7 +44,7 @@ bool RFIDManager::init() {
     byte version = m_rfid->PCD_ReadRegister(m_rfid->VersionReg);
     
     if (version == 0x00 || version == 0xFF) {
-        Serial.printf("[RFID] Module not detected! (Version: 0x%02X)\n", version);
+        LOG_W("RFID", "module not detected (Version: 0x%02X)", version);
         delete m_rfid;
         m_rfid = nullptr;
         m_detected = false;
@@ -55,7 +56,7 @@ bool RFIDManager::init() {
     // 0x07 << 4 sets the RxGain bits to the maximum value
     m_rfid->PCD_SetAntennaGain(m_rfid->RxGain_max);
 
-    Serial.printf("[RFID] WS1850S detected. Version: 0x%02X, Gain: MAX (48dB)\n", version);
+    LOG_I("RFID", "WS1850S detected. Version: 0x%02X, Gain: MAX (48dB)", version);
     m_detected = true;
     
     // Antena starts OFF by default to save power
@@ -148,9 +149,9 @@ void RFIDManager::update() {
         m_lastTag.isMagic = probeMagicGen1a();
     }
 
-    Serial.printf("[RFID] Tag Detected: %s (%s, SAK: 0x%02X, MAGIC: %s)\n",
-                  m_lastTag.uid.c_str(), m_lastTag.type.c_str(), m_lastTag.sak,
-                  m_lastTag.isMagic ? "YES" : "NO");
+    LOG_I("RFID", "Tag Detected: %s (%s, SAK: 0x%02X, MAGIC: %s)",
+          m_lastTag.uid.c_str(), m_lastTag.type.c_str(), m_lastTag.sak,
+          m_lastTag.isMagic ? "YES" : "NO");
     m_hasTag = true;
 
     // Notify ONLY if it's a new UID detect
@@ -197,7 +198,7 @@ bool RFIDManager::probeMagicGen1a() {
         isMagic = m_rfid->MIFARE_OpenUidBackdoor(false);
     }
     if (isMagic) {
-        Serial.println("[RFID] Magic Gen1a backdoor ACK -> block 0 / UID is rewritable");
+        LOG_I("RFID", "Magic Gen1a backdoor ACK -> block 0 / UID is rewritable");
     }
 
     // MIFARE_OpenUidBackdoor() begins with HALTA, so the tag is left halted
@@ -212,7 +213,7 @@ bool RFIDManager::probeMagicGen1a() {
     byte bufferSize = sizeof(bufferATQA);
     if (m_rfid->PICC_WakeupA(bufferATQA, &bufferSize) != MFRC522_I2C::STATUS_OK ||
         m_rfid->PICC_Select(&m_rfid->uid, 0) != MFRC522_I2C::STATUS_OK) {
-        Serial.println("[RFID] Magic probe: tag did not re-select cleanly; bus/tag state suspect");
+        LOG_W("RFID", "Magic probe: tag did not re-select cleanly; bus/tag state suspect");
     }
     return isMagic;
 }
@@ -234,7 +235,7 @@ void RFIDManager::clearTag() {
 void RFIDManager::activate() {
     if (!m_detected || !m_rfid) return;
     
-    Serial.println("[RFID] Activating antenna...");
+    LOG_I("RFID", "Activating antenna...");
     m_rfid->PCD_AntennaOn();
     m_active = true;
 }
@@ -242,7 +243,7 @@ void RFIDManager::activate() {
 void RFIDManager::deactivate() {
     if (!m_detected || !m_rfid) return;
     
-    Serial.println("[RFID] Deactivating antenna (low power)...");
+    LOG_I("RFID", "Deactivating antenna (low power)...");
     m_rfid->PCD_StopCrypto1();
     m_rfid->PICC_HaltA();
     m_rfid->PCD_AntennaOff();

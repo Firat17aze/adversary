@@ -17,6 +17,7 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -81,7 +82,7 @@ struct HandshakeMetadata {
 inline bool saveHandshakeMetadata(const char* pcapPath, const HandshakeMetadata& metadata) {
 #ifdef ESP32
     if (!pcapPath) {
-        Serial.println("[Metadata] ERROR: pcapPath is null!");
+        LOG_W("META", "pcapPath is null");
         return false;
     }
     
@@ -92,7 +93,7 @@ inline bool saveHandshakeMetadata(const char* pcapPath, const HandshakeMetadata&
     
     char* ext = strstr(jsonPath, ".pcap");
     if (!ext) {
-        Serial.printf("[Metadata] ERROR: Path doesn't contain '.pcap': %s\n", jsonPath);
+        LOG_W("META", "path doesn't contain '.pcap': %s", jsonPath);
         return false;
     }
     strcpy(ext, ".json");
@@ -136,14 +137,14 @@ inline bool saveHandshakeMetadata(const char* pcapPath, const HandshakeMetadata&
     // Write to file
     File file = SD.open(jsonPath, FILE_WRITE);
     if (!file) {
-        Serial.printf("[Metadata] Failed to create: %s\n", jsonPath);
+        LOG_E("META", "failed to create: %s", jsonPath);
         return false;
     }
     
     serializeJson(doc, file);
     file.close();
     
-    Serial.printf("[Metadata] Saved: %s\n", jsonPath);
+    LOG_D("META", "Saved: %s", jsonPath);
     return true;
 #else
     (void)pcapPath;
@@ -180,18 +181,18 @@ inline bool loadHandshakeMetadata(const char* pcapPath, HandshakeMetadata& metad
     size_t freeHeap = ESP.getFreeHeap();
     if (freeHeap < 10000) {  // metadata parse needs a few KB of heap to grow into
         file.close();
-        Serial.printf("[Metadata] Skipping parse - low heap: %u bytes (file: %s)\n", freeHeap, pcapPath);
+        LOG_W("META", "skipping parse - low heap: %u bytes (file: %s)", freeHeap, pcapPath);
         return false;  // Skip metadata loading when heap is critically low
     }
 
-    Serial.printf("[Metadata] Loading %s (heap: %u)\n", jsonPath, freeHeap);
+    LOG_D("META", "Loading %s (heap: %u)", jsonPath, freeHeap);
 
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
     
     if (error) {
-        Serial.printf("[Metadata] Parse error: %s (heap: %u, needed more than 1KB buffer)\n", error.c_str(), freeHeap);
+        LOG_E("META", "parse error: %s (heap: %u, needed more than 1KB buffer)", error.c_str(), freeHeap);
         return false;
     }
     
