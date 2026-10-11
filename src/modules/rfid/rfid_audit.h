@@ -25,7 +25,8 @@ struct MifareSectorData {
     uint8_t keyB[6];
     uint8_t keyAIndex;     // Which default key matched (0-31, 255=none)
     uint8_t keyBIndex;     // Which default key matched (0-31, 255=none)
-    // NOTE: Block data is streamed to SD card, not stored here
+    uint8_t blocks[4][16]; // Block data read during the audit (slice-0050, buffered not streamed)
+    bool blockRead[4];     // Whether each of the sector's 4 blocks was read back successfully
 };
 
 /**
@@ -60,8 +61,7 @@ struct AuditSummary {
  * @brief Options passed to runDictionaryAttack
  */
 struct AuditOptions {
-    bool readData;           // Whether to read block data after cracking
-    const char* dumpPath;    // Path to stream data (e.g., /adversary/captures/RFID/xxx.nfc)
+    bool readData;           // Whether to read block data into the in-RAM buffer after cracking
 };
 
 class RfidAudit {
@@ -113,6 +113,10 @@ private:
     uint32_t m_auditDurationMs;
     bool m_dataReadEnabled;
     char m_dumpFilename[64];
+    // Card identity captured at audit start so saveToSD() needs no live card (slice-0050).
+    uint8_t m_uid[10];
+    uint8_t m_uidSize;
+    uint8_t m_sak;
     
     // Default keys to try (extended from Flipper Zero dictionary)
     static const uint8_t DEFAULT_KEYS[][6];

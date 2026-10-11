@@ -97,7 +97,7 @@ void RfidScreen::update() {
             footerHints_.setHints({
                 {'d', "Details", true},
                 {'a', "Audit", canAudit}, // canAudit determines if it's enabled/gray
-                {'s', "Save", true},
+                {'s', "Save", hasAuditData()},
                 {'w', "Write", true}
             });
         }
@@ -361,18 +361,9 @@ void RfidScreen::drawAuditPrompt(Canvas& canvas) {
     canvas.print("Target: ");
     canvas.setTextColor(theme::SUCCESS());
     canvas.print(tag->uid.c_str());
-    y += rowH;
-    
-    // Filename display (not selectable)
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(x, y);
-    canvas.print("File  : ");
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.print(m_auditFilename);
-    canvas.setTextColor(theme::TEXT_DISABLED());
-    canvas.print(".nfc");
     y += rowH + 4;
-    
+    // The dump is named at save time (slice-0050), so no filename is shown on the pre-audit prompt.
+
     canvas.drawFastHLine(x, y, screenW - 16, theme::BG_SECONDARY());
     y += 6;
     
@@ -439,7 +430,12 @@ void RfidScreen::drawAuditPrompt(Canvas& canvas) {
 
 bool RfidScreen::handleInput(char key) {
     if (nameInput_.isVisible()) {
-        return nameInput_.handleInput(key);
+        // render() early-returns unless m_needsRedraw; the popup repaints only when we
+        // mark the screen dirty, so every popup keystroke/cancel must request a redraw
+        // or typing/backspace/ESC produce no visible change (looks frozen).
+        bool handled = nameInput_.handleInput(key);
+        m_needsRedraw = true;
+        return handled;
     }
 
     char action = 0;
@@ -455,7 +451,7 @@ bool RfidScreen::handleInput(char key) {
             m_state = State::AUDIT_SUMMARY;
             footerHints_.setHints({
                 {'\n', "View", true},
-                {'s', "Save", true},
+                {'s', "Save", hasAuditData()},
                 {'`', "Back", true}
             });
             m_needsRedraw = true;
@@ -466,7 +462,7 @@ bool RfidScreen::handleInput(char key) {
             footerHints_.setHints({
                 {'d', "Details", true},
                 {'a', "Audit", canAudit},
-                {'s', "Save", true}
+                {'s', "Save", hasAuditData()}
             });
             m_needsRedraw = true;
         } else if (m_state == State::AUDIT_PROMPT) {
@@ -476,7 +472,7 @@ bool RfidScreen::handleInput(char key) {
             footerHints_.setHints({
                 {'d', "Details", true},
                 {'a', "Audit", canAudit},
-                {'s', "Save", true}
+                {'s', "Save", hasAuditData()}
             });
             m_needsRedraw = true;
         } else if (m_state == State::AUDITING || m_state == State::DETAILS) {
@@ -487,7 +483,7 @@ bool RfidScreen::handleInput(char key) {
             footerHints_.setHints({
                 {'d', "Details", true},
                 {'a', "Audit", canAudit},
-                {'s', "Save", true}
+                {'s', "Save", hasAuditData()}
             });
             m_needsRedraw = true;
         } else if (m_state == State::WRITE_PROMPT) {
@@ -639,10 +635,15 @@ bool RfidScreen::handleInput(char key) {
 
     if (m_state == State::RESULT) {
         if (key == 's') {
-            nameInput_.show("Save Dump", "TagDump");
+            // Save is greyed until an audit produces a dump; pressing it before then is a no-op
+            // (the footer already shows it disabled) rather than a loud "Save Failed" (slice-0050).
+            if (!hasAuditData()) return true;
+            nameInput_.show("Save As", m_auditFilename, false, sizeof(m_auditFilename) - 1);
             nameInput_.setOnSubmit([this](const char* name) {
-                saveDump(name);
+                const char* chosen = (name && name[0] != '\0') ? name : m_auditFilename;
+                saveDump(chosen);
             });
+            m_needsRedraw = true;
             return true;
         }
     }
@@ -679,8 +680,15 @@ bool RfidScreen::handleInput(char key) {
                 m_needsRedraw = true;
                 return true;
                 
-            case 's':  // Save
-                saveDump("audit_results");
+            case 's':  // Save - prompt for the dump name, pre-filled with the UID (slice-0050)
+                nameInput_.show("Save As", m_auditFilename, false,
+                                sizeof(m_auditFilename) - 1);
+                nameInput_.setOnSubmit([this](const char* name) {
+                    // An empty entry falls back to the UID: never write a nameless .nfc.
+                    const char* chosen = (name && name[0] != '\0') ? name : m_auditFilename;
+                    saveDump(chosen);
+                });
+                m_needsRedraw = true;
                 return true;
         }
     }
@@ -710,8 +718,9 @@ bool RfidScreen::handleInput(char key) {
                     m_readDataOption = !m_readDataOption;
                     m_needsRedraw = true;
                 } else if (m_promptSelection == 1) {
-                    // Start audit
-                    startAuditWithOptions(m_auditFilename, m_readDataOption);
+                    // Start the audit directly: the dump is buffered in RAM and named at save time
+                    // from the summary screen (slice-0050), not streamed to a pre-named file.
+                    startAuditWithOptions(m_readDataOption);
                 }
                 return true;
         }
@@ -766,34 +775,24 @@ void RfidScreen::promptAudit() {
     });
 }
 
-void RfidScreen::startAuditWithOptions(const char* filename, bool readData) {
+void RfidScreen::startAuditWithOptions(bool readData) {
     if (!m_audit || !m_manager.getLastTag()) return;
-    
+
     m_state = State::AUDITING;
     m_auditProgress = 0.0f;
     m_keysFound = 0;
     memset(&m_lastAuditProgress, 0, sizeof(m_lastAuditProgress));
     m_needsRedraw = true;
-    
+
     // Set UI hints for auditing
     footerHints_.clear();
-    
+
     // Force initial render BEFORE the blocking audit starts
     adversary_ui_render_forced();
 
-    // Build full path for dump
-    char fullPath[128];
-    snprintf(fullPath, sizeof(fullPath), "/adversary/captures/RFID/%s.nfc", filename);
-    
-    // Ensure directory exists
-    if (!SD.exists("/adversary/captures/RFID")) {
-        SD.mkdir("/adversary/captures");
-        SD.mkdir("/adversary/captures/RFID");
-    }
-    
+    // The dump is buffered in RAM and written at save time (slice-0050), so no file is opened here.
     AuditOptions opts = {
-        .readData = readData,
-        .dumpPath = fullPath
+        .readData = readData
     };
 
     // Run audit with options
@@ -814,7 +813,7 @@ void RfidScreen::startAuditWithOptions(const char* filename, bool readData) {
         footerHints_.setHints({
             {'\n', "Read", true},
             {'a', "Audit", true},
-            {'s', "Save", true}
+            {'s', "Save", hasAuditData()}
         });
     } else {
         m_keysFound = result;
@@ -840,14 +839,20 @@ void RfidScreen::onAuditComplete() {
     
     footerHints_.setHints({
         {'\n', "View", true},
-        {'s', "Save", true},
+        {'s', "Save", hasAuditData()},
         {'`', "Back", true}
     });
 }
 
+bool RfidScreen::hasAuditData() const {
+    // The dashboard Save writes the audit dump, which only exists after a run. Without it there is
+    // nothing to save, so the Save affordance stays greyed (slice-0050).
+    return m_audit && !m_audit->getResults().empty();
+}
+
 void RfidScreen::saveDump(const char* name) {
     if (m_audit && m_audit->saveToSD(name)) {
-        ToastManager::getInstance().show("Saved to /rfid/", ToastType::SUCCESS);
+        ToastManager::getInstance().show("Saved to /RFID/", ToastType::SUCCESS);
     } else {
         ToastManager::getInstance().show("Save Failed", ToastType::ERROR);
     }

@@ -137,11 +137,14 @@ const char* RfidAudit::KEY_NAMES[] = {
 
 const size_t RfidAudit::NUM_DEFAULT_KEYS = sizeof(DEFAULT_KEYS) / 6;
 
-RfidAudit::RfidAudit(MFRC522_I2C* rfid) 
+RfidAudit::RfidAudit(MFRC522_I2C* rfid)
     : m_rfid(rfid)
     , m_auditDurationMs(0)
-    , m_dataReadEnabled(false) {
+    , m_dataReadEnabled(false)
+    , m_uidSize(0)
+    , m_sak(0) {
     memset(m_dumpFilename, 0, sizeof(m_dumpFilename));
+    memset(m_uid, 0, sizeof(m_uid));
 }
 
 int RfidAudit::runDictionaryAttack(
@@ -152,10 +155,13 @@ int RfidAudit::runDictionaryAttack(
     
     // Store options for summary
     m_dataReadEnabled = opts.readData;
-    if (opts.dumpPath) {
-        strncpy(m_dumpFilename, opts.dumpPath, sizeof(m_dumpFilename) - 1);
-    }
-    
+
+    // Capture the card identity now so saveToSD() can emit the .nfc header later without a live
+    // card on the reader (slice-0050: the dump is buffered and written at save time, not streamed).
+    m_uidSize = (m_rfid->uid.size <= sizeof(m_uid)) ? m_rfid->uid.size : sizeof(m_uid);
+    memcpy(m_uid, m_rfid->uid.uidByte, m_uidSize);
+    m_sak = m_rfid->uid.sak;
+
     uint32_t auditStartMs = millis();
     m_results.clear();
     
@@ -172,36 +178,11 @@ int RfidAudit::runDictionaryAttack(
     memset(&progressLine, 0, sizeof(progressLine));
     progressLine.elapsedMs = 0;
     
-    // Open file for streaming if readData is enabled
-    File dumpFile;
-    if (opts.readData && opts.dumpPath) {
-        dumpFile = SD.open(opts.dumpPath, FILE_WRITE);
-        if (dumpFile) {
-            // Write Flipper .nfc file header
-            dumpFile.println("Filetype: Flipper NFC device");
-            dumpFile.println("Version: 4");
-            dumpFile.println("Device type: MIFARE Classic");
-            
-            // UID
-            dumpFile.print("UID: ");
-            for (byte i = 0; i < m_rfid->uid.size; i++) {
-                dumpFile.printf("%02X", m_rfid->uid.uidByte[i]);
-                if (i < m_rfid->uid.size - 1) dumpFile.print(" ");
-            }
-            dumpFile.println();
-            
-            dumpFile.printf("ATQA: %02X %02X\n", 0x00, 0x04);  // Standard MIFARE
-            dumpFile.printf("SAK: %02X\n", sak);
-            dumpFile.println("Mifare Classic type: 1K");
-        }
-    }
-    
     // Wake the card from any potential HALT/SILENT state into a selected one (slice-0049).
     bool selected = reselectCard(m_rfid);
 
     if (!selected) {
         Serial.println("[RFID] Audit Error: Card not responding to WUPA");
-        if (dumpFile) dumpFile.close();
         return 0;
     }
 
@@ -213,7 +194,9 @@ int RfidAudit::runDictionaryAttack(
         sectorData.keyBFound = false;
         sectorData.keyAIndex = 255;  // 255 = not found
         sectorData.keyBIndex = 255;
-        
+        memset(sectorData.blocks, 0, sizeof(sectorData.blocks));
+        for (int b = 0; b < 4; b++) sectorData.blockRead[b] = false;
+
         uint8_t firstBlock = s * 4;
         
         // Re-select at the start of each sector (except sector 0, just selected above): the previous
@@ -298,12 +281,14 @@ int RfidAudit::runDictionaryAttack(
             }
         }
         
-        // Read block data if enabled and we have at least one key
-        if (opts.readData && dumpFile && (sectorData.keyAFound || sectorData.keyBFound)) {
+        // Read block data into the in-RAM buffer if enabled and we have at least one key (slice-0050:
+        // buffered, not streamed -- saveToSD() emits the .nfc from these results at save time). Keys
+        // are already retained in sectorData, so nothing is written to SD here.
+        if (opts.readData && (sectorData.keyAFound || sectorData.keyBFound)) {
             // Choose which key to use for reading (prefer Key A)
             uint8_t* readKey = sectorData.keyAFound ? sectorData.keyA : sectorData.keyB;
             bool useKeyA = sectorData.keyAFound;
-            
+
             MFRC522_I2C::MIFARE_Key mfKey;
             memcpy(mfKey.keyByte, readKey, 6);
 
@@ -320,13 +305,10 @@ int RfidAudit::runDictionaryAttack(
                 firstBlock, &mfKey, &(m_rfid->uid));
 
             if (authStatus != MFRC522_I2C::STATUS_OK) {
-                // The whole sector will not authenticate for reading despite a cracked key --
-                // placeholder all four blocks and say so once (slice-0045/0046).
+                // The whole sector will not authenticate for reading despite a cracked key -- leave
+                // all four blockRead flags false (saveToSD emits '??') and say so once (slice-0045/0046).
                 Serial.printf("[RFID] Sector %d: AUTH FAILED for read with cracked key (status %d) -> 4x ?? in dump\n",
                               s, authStatus);
-                for (int block = 0; block < 4; block++) {
-                    dumpFile.printf("Block %d: %s\n", firstBlock + block, UNKNOWN_BLOCK_HEX);
-                }
             } else {
                 for (int block = 0; block < 4; block++) {
                     uint8_t blockAddr = firstBlock + block;
@@ -337,54 +319,25 @@ int RfidAudit::runDictionaryAttack(
                         (MFRC522_I2C::StatusCode)m_rfid->MIFARE_Read(blockAddr, buffer, &bufferSize);
 
                     if (readStatus == MFRC522_I2C::STATUS_OK) {
-                        dumpFile.printf("Block %d: ", blockAddr);
-                        for (int i = 0; i < 16; i++) {
-                            dumpFile.printf("%02X", buffer[i]);
-                            if (i < 15) dumpFile.print(" ");
-                        }
-                        dumpFile.println();
+                        memcpy(sectorData.blocks[block], buffer, 16);
+                        sectorData.blockRead[block] = true;
                     } else {
                         // Auth held for the sector but this block would not read back. Fail loud
                         // with the status so a '??' here is a read miss, not a key miss (slice-0045).
+                        // blockRead[block] stays false.
                         Serial.printf("[RFID] Sector %d block %d: READ FAILED (auth OK, MIFARE_Read status %d) -> ?? in dump\n",
                                       s, blockAddr, readStatus);
-                        dumpFile.printf("Block %d: %s\n", blockAddr, UNKNOWN_BLOCK_HEX);
                     }
                 }
             }
             m_rfid->PCD_StopCrypto1();  // close the sector's crypto session once
 
-            // Write keys to file
-            dumpFile.printf("Key A: ");
-            if (sectorData.keyAFound) {
-                for (int i = 0; i < 6; i++) {
-                    dumpFile.printf("%02X", sectorData.keyA[i]);
-                    if (i < 5) dumpFile.print(" ");
-                }
-            } else {
-                dumpFile.print(UNKNOWN_KEY_HEX);
-            }
-            dumpFile.println();
-
-            dumpFile.printf("Key B: ");
-            if (sectorData.keyBFound) {
-                for (int i = 0; i < 6; i++) {
-                    dumpFile.printf("%02X", sectorData.keyB[i]);
-                    if (i < 5) dumpFile.print(" ");
-                }
-            } else {
-                dumpFile.print(UNKNOWN_KEY_HEX);
-            }
-            dumpFile.println();
-            dumpFile.println();  // Blank line between sectors
-
             // No re-select needed here: this sector's read already re-selected at its start, and
             // the next sector re-selects before its own dictionary pass (slice-0046).
-        } else if (opts.readData && dumpFile) {
-            // No dictionary key for this sector, so it is omitted from the dump entirely (the
-            // block/key write above is gated on a key). Say so loudly rather than leaving a silent
-            // gap -- this is the dominant cause of missing sectors on a card with non-default keys
-            // (slice-0045).
+        } else if (opts.readData) {
+            // No dictionary key for this sector, so it is omitted from the dump entirely (the block
+            // read above is gated on a key). Say so loudly rather than leaving a silent gap -- this
+            // is the dominant cause of missing sectors on a card with non-default keys (slice-0045).
             Serial.printf("[RFID] Sector %d: no dictionary key found -> omitted from dump (4 data blocks unreadable, keys unknown)\n", s);
         }
         
@@ -395,13 +348,7 @@ int RfidAudit::runDictionaryAttack(
         
         m_results.push_back(sectorData);
     }
-    
-    // Close dump file
-    if (dumpFile) {
-        dumpFile.close();
-        Serial.printf("[RFID] Block data saved to: %s\n", opts.dumpPath);
-    }
-    
+
     m_auditDurationMs = millis() - auditStartMs;
     
     if (onProgress) {
@@ -446,39 +393,77 @@ bool RfidAudit::tryKey(uint8_t block, uint8_t* key, bool isKeyA) {
 
 bool RfidAudit::saveToSD(const char* filename) {
     if (m_results.empty()) return false;
-    
+
+    // One directory for every RFID capture (slice-0050: the former lowercase /rfid/ keys-only path
+    // is retired; this is the Flipper-v4 dump the audit used to stream, now written from the buffer).
+    // Create the chain top-down -- mkdir is not recursive, so a missing parent would fail the leaf.
+    if (!SD.exists("/adversary")) SD.mkdir("/adversary");
+    if (!SD.exists("/adversary/captures")) SD.mkdir("/adversary/captures");
+    if (!SD.exists("/adversary/captures/RFID")) SD.mkdir("/adversary/captures/RFID");
+
     char path[128];
-    snprintf(path, sizeof(path), "/adversary/captures/rfid/%s.nfc", filename);
-    
-    // Ensure directory exists
-    if (!SD.exists("/adversary/captures/rfid")) {
-        SD.mkdir("/adversary/captures/rfid");
-    }
-    
+    snprintf(path, sizeof(path), "/adversary/captures/RFID/%s.nfc", filename);
+
     File file = SD.open(path, FILE_WRITE);
     if (!file) return false;
-    
+
+    // Flipper .nfc header, from the card identity captured at audit start.
     file.println("Filetype: Flipper NFC device");
-    file.println("Version: 3");
-    file.println("# The Adversary RFID Dump");
-    
-    // Header (simplified for example)
-    file.println("Device type: Mifare Classic 1K");
-    
-    for (const auto& s : m_results) {
-        file.printf("# Sector %d\n", s.sector);
-        if (s.keyAFound) {
-            file.print("Key A: ");
-            for (int i = 0; i < 6; i++) file.printf("%02X ", s.keyA[i]);
-            file.println();
-        }
-        if (s.keyBFound) {
-            file.print("Key B: ");
-            for (int i = 0; i < 6; i++) file.printf("%02X ", s.keyB[i]);
-            file.println();
-        }
+    file.println("Version: 4");
+    file.println("Device type: MIFARE Classic");
+    file.print("UID: ");
+    for (uint8_t i = 0; i < m_uidSize; i++) {
+        file.printf("%02X", m_uid[i]);
+        if (i < m_uidSize - 1) file.print(" ");
     }
-    
+    file.println();
+    file.printf("ATQA: %02X %02X\n", 0x00, 0x04);  // Standard MIFARE
+    file.printf("SAK: %02X\n", m_sak);
+    file.println("Mifare Classic type: 1K");
+
+    // Per cracked sector: the four block rows (read bytes or a named placeholder) then Key A/B. A
+    // sector with no cracked key is omitted entirely (slice-0045), matching the former stream.
+    for (const auto& s : m_results) {
+        if (!s.keyAFound && !s.keyBFound) continue;
+
+        uint8_t firstBlock = s.sector * 4;
+        for (int block = 0; block < 4; block++) {
+            if (s.blockRead[block]) {
+                file.printf("Block %d: ", firstBlock + block);
+                for (int i = 0; i < 16; i++) {
+                    file.printf("%02X", s.blocks[block][i]);
+                    if (i < 15) file.print(" ");
+                }
+                file.println();
+            } else {
+                file.printf("Block %d: %s\n", firstBlock + block, UNKNOWN_BLOCK_HEX);
+            }
+        }
+
+        file.print("Key A: ");
+        if (s.keyAFound) {
+            for (int i = 0; i < 6; i++) {
+                file.printf("%02X", s.keyA[i]);
+                if (i < 5) file.print(" ");
+            }
+        } else {
+            file.print(UNKNOWN_KEY_HEX);
+        }
+        file.println();
+
+        file.print("Key B: ");
+        if (s.keyBFound) {
+            for (int i = 0; i < 6; i++) {
+                file.printf("%02X", s.keyB[i]);
+                if (i < 5) file.print(" ");
+            }
+        } else {
+            file.print(UNKNOWN_KEY_HEX);
+        }
+        file.println();
+        file.println();  // Blank line between sectors
+    }
+
     file.close();
     return true;
 }

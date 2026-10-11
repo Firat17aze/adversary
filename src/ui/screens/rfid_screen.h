@@ -120,10 +120,11 @@ private:
     
     // Actions
     void promptAudit();
-    void startAuditWithOptions(const char* filename, bool readData);
+    void startAuditWithOptions(bool readData);
     void startAudit();  // Legacy, now calls promptAudit
     void onAuditComplete();
     void saveDump(const char* name);
+    bool hasAuditData() const;  // True once an audit has produced results worth saving (slice-0050)
 
     // Write/restore actions (slice-0043)
     void enterWritePick();                      // Scan the RFID captures dir, show the picker

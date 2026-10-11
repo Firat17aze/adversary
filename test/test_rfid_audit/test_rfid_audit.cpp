@@ -16,9 +16,11 @@
 
 using namespace adversary;
 
-// A dump path for the read-path diagnostic tests. The SD mock strips the leading '/' and writes
-// relative to the CWD, so this lands beside the test binary and is removed in setUp/tearDown.
-static const char* kDiagDumpPath = "/rfid_audit_diag_test.nfc";
+// saveToSD writes to /adversary/captures/RFID/<name>.nfc; the SD mock strips the leading '/' and
+// writes relative to the CWD, so dumps land beside the test binary and are removed in tearDown.
+static std::string nfcPath(const char* name) {
+    return std::string("adversary/captures/RFID/") + name + ".nfc";
+}
 
 void setUp() {
     mockSerialClear();
@@ -28,17 +30,17 @@ void setUp() {
     g_mockSelectedSinceAuth = true;
     g_mockWupaNeedsHalt = false;
     g_mockTagState = MOCK_TAG_ACTIVE;
-    SD.remove(kDiagDumpPath);
 }
 
 void tearDown() {
-    SD.remove(kDiagDumpPath);
+    // Remove any dumps the save-path tests wrote (ignore absence).
+    ::remove(nfcPath("blocktest").c_str());
+    ::remove(nfcPath("fulldump").c_str());
 }
 
-// Read back the streamed dump (the SD mock writes it relative to the CWD).
-static std::string readDumpFile() {
-    const char* rel = (kDiagDumpPath[0] == '/') ? kDiagDumpPath + 1 : kDiagDumpPath;
-    FILE* f = fopen(rel, "r");
+// Read back a saved .nfc dump (the SD mock writes relative to the CWD).
+static std::string readNfc(const char* name) {
+    FILE* f = fopen(nfcPath(name).c_str(), "r");
     if (!f) return "";
     std::string out;
     char buf[512];
@@ -118,7 +120,6 @@ void test_audit_reports_block_read_failure() {
 
     AuditOptions opts;
     opts.readData = true;
-    opts.dumpPath = kDiagDumpPath;
 
     audit.runDictionaryAttack([](const AuditProgressInfo&){}, opts);
 
@@ -137,7 +138,6 @@ void test_audit_reports_no_key_sector_omitted() {
 
     AuditOptions opts;
     opts.readData = true;
-    opts.dumpPath = kDiagDumpPath;
 
     int keysFound = audit.runDictionaryAttack([](const AuditProgressInfo&){}, opts);
 
@@ -157,13 +157,65 @@ void test_audit_reads_all_blocks_under_single_auth() {
 
     AuditOptions opts;
     opts.readData = true;
-    opts.dumpPath = kDiagDumpPath;
+
+    audit.runDictionaryAttack([](const AuditProgressInfo&){}, opts);
+    TEST_ASSERT_TRUE(audit.saveToSD("blocktest"));
+
+    std::string dump = readNfc("blocktest");
+    TEST_ASSERT_TRUE(dump.find("Block 0:") != std::string::npos);  // the dump was actually written
+    TEST_ASSERT_TRUE(dump.find("??") == std::string::npos);        // every block read back
+}
+
+// slice-0050: the audit buffers block data in RAM (it no longer streams to a file). After a run with
+// readData, every cracked sector's blocks must be readable off the result struct. Fails before the
+// fix: MifareSectorData had no block storage (the bytes went straight to the dump file and were lost
+// to the struct), so blockRead[] did not exist / was never set.
+void test_audit_buffers_block_data() {
+    MFRC522_I2C rfid(0x28, -1);
+    RfidAudit audit(&rfid);
+
+    AuditOptions opts;
+    opts.readData = true;
 
     audit.runDictionaryAttack([](const AuditProgressInfo&){}, opts);
 
-    std::string dump = readDumpFile();
-    TEST_ASSERT_TRUE(dump.find("Block 0:") != std::string::npos);  // the dump was actually written
-    TEST_ASSERT_TRUE(dump.find("??") == std::string::npos);        // every block read back
+    const auto& results = audit.getResults();
+    TEST_ASSERT_EQUAL(16, results.size());
+    TEST_ASSERT_TRUE(results[0].keyAFound);
+    for (int b = 0; b < 4; b++) {
+        TEST_ASSERT_TRUE(results[0].blockRead[b]);      // every block was read into the buffer
+        TEST_ASSERT_EQUAL_UINT8(0x00, results[0].blocks[b][0]);  // mock reads 16 zero bytes
+    }
+}
+
+// slice-0050: saveToSD writes the full Flipper-v4 dump (header + per-sector blocks + keys) from the
+// buffer to /adversary/captures/RFID/<name>.nfc. Fails before the fix: the old saveToSD wrote a
+// keys-only v3 body to the lowercase /rfid/ path, so neither the v4 header, a Block row, nor the
+// capital-RFID path are present.
+void test_saveToSD_writes_full_flipper_dump() {
+    MFRC522_I2C rfid(0x28, -1);
+    RfidAudit audit(&rfid);
+
+    AuditOptions opts;
+    opts.readData = true;
+
+    audit.runDictionaryAttack([](const AuditProgressInfo&){}, opts);
+    TEST_ASSERT_TRUE(audit.saveToSD("fulldump"));
+
+    std::string dump = readNfc("fulldump");
+    TEST_ASSERT_TRUE(dump.find("Version: 4") != std::string::npos);
+    TEST_ASSERT_TRUE(dump.find("Device type: MIFARE Classic") != std::string::npos);
+    TEST_ASSERT_TRUE(dump.find("Block 0:") != std::string::npos);  // blocks are in the dump
+    TEST_ASSERT_TRUE(dump.find("Key A:") != std::string::npos);    // keys are in the dump
+}
+
+// slice-0050: with no cracked keys there is nothing to dump, so saveToSD reports failure loudly
+// rather than writing an empty/header-only file.
+void test_saveToSD_fails_when_no_results() {
+    MFRC522_I2C rfid(0x28, -1);
+    RfidAudit audit(&rfid);  // never ran an audit -> m_results empty
+
+    TEST_ASSERT_FALSE(audit.saveToSD("fulldump"));
 }
 
 // slice-0049: every full-select site must HALT before WUPA. A tag left ACTIVE by the previous
@@ -198,6 +250,9 @@ int main() {
     RUN_TEST(test_audit_reports_block_read_failure);
     RUN_TEST(test_audit_reports_no_key_sector_omitted);
     RUN_TEST(test_audit_reads_all_blocks_under_single_auth);
+    RUN_TEST(test_audit_buffers_block_data);
+    RUN_TEST(test_saveToSD_writes_full_flipper_dump);
+    RUN_TEST(test_saveToSD_fails_when_no_results);
     RUN_TEST(test_audit_reselect_halts_before_wupa_between_sectors);
     return UNITY_END();
 }
