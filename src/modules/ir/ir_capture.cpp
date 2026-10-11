@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <IRrecv.h>
 #include <IRutils.h>
+#include "utils/log.h"
 
 namespace adversary {
 namespace ir {
@@ -53,7 +54,7 @@ bool captureIrSignal(uint32_t windowMs, IrSignal& out) {
     // blink the target ignores. Reject it (fail loud) rather than save a broken
     // code — this covers both the decoded and raw paths below.
     if (results.overflow) {
-        Serial.println("[IR] Capture rejected: RX buffer overflow (frame too long)");
+        LOG_W("IR", "Capture rejected: RX buffer overflow (frame too long)");
         return false;
     }
 
@@ -76,7 +77,7 @@ bool captureIrSignal(uint32_t windowMs, IrSignal& out) {
     // clipped frame is an incomplete code. irSignalValid() enforces the same
     // 1..IR_MAX_TIMINGS bound, so assigning the full length keeps that gate honest.
     if (length == 0 || length > IR_MAX_TIMINGS) {
-        Serial.printf("[IR] Capture rejected: raw length %u out of range\n", length);
+        LOG_W("IR", "Capture rejected: raw length %u out of range", length);
         return false;
     }
     uint16_t* raw = resultToRawArray(&results);  // us, mark-first; heap-allocated

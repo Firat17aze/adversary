@@ -16,6 +16,7 @@
 #include "driver/rmt_encoder.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -90,7 +91,7 @@ bool ookRmtCapture(uint32_t windowMs, OokSignal& out) {
 
     rmt_channel_handle_t channel = nullptr;
     if (rmt_new_rx_channel(&rxConfig, &channel) != ESP_OK) {
-        Serial.println("[OOK] rmt_new_rx_channel failed");
+        LOG_E("OOK", "rmt_new_rx_channel failed");
         return false;
     }
 
@@ -117,7 +118,7 @@ bool ookRmtCapture(uint32_t windowMs, OokSignal& out) {
             }
             rmt_disable(channel);
         } else {
-            Serial.println("[OOK] RMT RX arm failed");
+            LOG_E("OOK", "RMT RX arm failed");
         }
         vQueueDelete(doneQueue);
     }
@@ -129,13 +130,13 @@ bool ookRmtCapture(uint32_t windowMs, OokSignal& out) {
 bool ookRmtReplay(const OokSignal& sig) {
     const size_t count = sig.durationsUs.size();
     if (count == 0 || count > OOK_MAX_PULSES) {
-        Serial.println("[OOK] replay: empty or oversized signal");
+        LOG_W("OOK", "replay: empty or oversized signal");
         return false;
     }
     for (uint16_t duration : sig.durationsUs) {
         if (duration > RMT_MAX_DURATION_US) {
-            Serial.printf("[OOK] replay: edge %u us exceeds RMT max %u us\n",
-                          duration, RMT_MAX_DURATION_US);
+            LOG_W("OOK", "replay: edge %u us exceeds RMT max %u us",
+                  duration, RMT_MAX_DURATION_US);
             return false;
         }
     }
@@ -165,7 +166,7 @@ bool ookRmtReplay(const OokSignal& sig) {
 
     rmt_channel_handle_t channel = nullptr;
     if (rmt_new_tx_channel(&txConfig, &channel) != ESP_OK) {
-        Serial.println("[OOK] rmt_new_tx_channel failed");
+        LOG_E("OOK", "rmt_new_tx_channel failed");
         return false;
     }
 
@@ -184,7 +185,7 @@ bool ookRmtReplay(const OokSignal& sig) {
                              symbols.size() * sizeof(rmt_symbol_word_t),
                              &transmitConfig) != ESP_OK ||
                 rmt_tx_wait_all_done(channel, REPLAY_DONE_TIMEOUT_MS) != ESP_OK) {
-                Serial.println("[OOK] rmt_transmit failed");
+                LOG_E("OOK", "rmt_transmit failed");
                 ok = false;
                 break;
             }
@@ -192,7 +193,7 @@ bool ookRmtReplay(const OokSignal& sig) {
         }
         rmt_disable(channel);
     } else {
-        Serial.println("[OOK] RMT TX setup failed");
+        LOG_E("OOK", "RMT TX setup failed");
     }
 
     if (encoder) rmt_del_encoder(encoder);

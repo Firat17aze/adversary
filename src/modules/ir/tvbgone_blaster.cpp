@@ -6,6 +6,7 @@
 #include "tvbgone_blaster.h"
 #include "core/event_bus.h"
 #include "config/pins.h"
+#include "utils/log.h"
 
 namespace adversary {
 namespace ir {
@@ -49,12 +50,12 @@ void TvBGoneBlaster::init() {
 #endif
 
     m_irSend->begin();
-    Serial.println("[IR] Blaster initialized");
+    LOG_I("IR", "Blaster initialized");
 }
 
 void TvBGoneBlaster::start(Region region) {
     if (region != Region::NORTH_AMERICA && region != Region::EUROPE) {
-        Serial.println("[IR] Error: Invalid region");
+        LOG_W("IR", "Invalid region");
         m_blasting = false;
         return;
     }
@@ -64,7 +65,7 @@ void TvBGoneBlaster::start(Region region) {
     m_blasting = true;
     m_totalCodes = (region == Region::NORTH_AMERICA) ? NA_DATABASE_SIZE : EU_DATABASE_SIZE;
     
-    Serial.printf("[IR] Starting TV-B-Gone blast for %s (%d codes)\n", 
+    LOG_I("IR", "Starting TV-B-Gone blast for %s (%d codes)",
                   region == Region::NORTH_AMERICA ? "NA" : "EU", m_totalCodes);
     
     sendNext();
@@ -73,7 +74,7 @@ void TvBGoneBlaster::start(Region region) {
 void TvBGoneBlaster::stop() {
     m_blasting = false;
     m_currentIndex = 0;
-    Serial.println("[IR] Blaster stopped");
+    LOG_I("IR", "Blaster stopped");
 }
 
 void TvBGoneBlaster::update() {
@@ -91,7 +92,7 @@ void TvBGoneBlaster::sendNext() {
 
     if (m_currentIndex >= m_totalCodes) {
         m_blasting = false;
-        Serial.println("[IR] Region scan complete");
+        LOG_I("IR", "Region scan complete");
         // Publish completion via EventBus
         adversary::EventData evt(adversary::EventType::IR_TRANSMISSION_COMPLETED);
         adversary::EventBus::getInstance().publish(evt);
@@ -125,7 +126,7 @@ void TvBGoneBlaster::sendNext() {
     int bufferIdx = 0;
 
     if (numPairs > 150) {
-        Serial.println("[IR] Error: Code too long for buffer");
+        LOG_W("IR", "Code too long for buffer");
         m_currentIndex++;
         return;
     }
@@ -165,7 +166,7 @@ void TvBGoneBlaster::sendNext() {
     // sendRaw's carrier is in Hz; the Sony-range repeat policy lives in emitIrBurst.
     emitIrBurst(*m_irSend, buffer, bufferIdx, freq);
 
-    Serial.printf("[IR] Blasted code %d/%d (Freq: %dkHz, Pairs: %d)\n", 
+    LOG_D("IR", "Blasted code %d/%d (Freq: %dkHz, Pairs: %d)",
                   m_currentIndex + 1, m_totalCodes, freq, numPairs);
 
     m_currentIndex++;
