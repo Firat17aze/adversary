@@ -44,13 +44,16 @@ jobs:
         run: pip install --upgrade platformio esptool==5.2.0
 
       - name: Build cardputer firmware
-        run: pio run -e cardputer
+        # Release env (slice-0054): identical to env:cardputer but ADV_LOG_LEVEL=WARN,
+        # so the shipped image drops the INFO format strings (~17 KB). Developers still
+        # flash the plain env:cardputer at INFO for full on-device serial.
+        run: pio run -e cardputer_release
 
       - name: Package release artifacts
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME}"
-          build=.pio/build/cardputer
+          build=.pio/build/cardputer_release
           # boot_app0.bin lives inside a versioned framework package; locate it rather
           # than hardcode the path.
           boot_app0="$(find "$HOME/.platformio/packages" -name boot_app0.bin | head -1)"
