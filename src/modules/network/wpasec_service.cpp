@@ -16,6 +16,7 @@
 #include "../../ui/components/toast_manager.h"
 #include "../../config/config.h"
 #include "../../utils/filename_utils.h"
+#include "utils/log.h"
 
 #if defined(ESP32) || defined(ARDUINO)
 #include <WiFi.h>
@@ -44,7 +45,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
     const char* filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
     
-    Serial.printf("[WPA-SEC] Upload starting: %s\n", filename);
+    LOG_I("WPASEC", "Upload starting: %s", filename);
     
     // Check local status FIRST (before opening file) to avoid SD reads for already-uploaded files
     // This is a pure memory operation using registry - no SD access needed
@@ -89,7 +90,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
     // refuse to start TLS on a stale clock (would fail a legit server cert).
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        Serial.println("[WPA-SEC] Clock not NTP/GPS-synced — skipping (retry next sync)");
+        LOG_W("WPASEC", "Clock not NTP/GPS-synced — skipping (retry next sync)");
         return false;
     }
 
@@ -97,7 +98,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
     // (and leave the file for retry) instead of dying part-way through connect().
     if (tls_upload::heapTooLowForTls()) {
         showErrorToast("Low heap, try again");
-        Serial.println("[WPA-SEC] Heap too low for TLS — skipping (retry next sync)");
+        LOG_W("WPASEC", "Heap too low for TLS — skipping (retry next sync)");
         return false;
     }
 
@@ -109,7 +110,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
 
     if (!tls_upload::connectWithRetry(client, WPASEC_HOST, WPASEC_PORT, "WPA-SEC")) {
         showErrorToast("Connection failed");
-        Serial.printf("[WPA-SEC] Upload connect failed (heap: %lu)\n", ESP.getFreeHeap());
+        LOG_E("WPASEC", "Upload connect failed (heap: %lu)", ESP.getFreeHeap());
         return false;
     }
     
@@ -248,11 +249,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
             body.trim();
         }
         if (body.length() > 0) {
-            // Print FULL error to serial for debugging
-            Serial.println("[WpaSec] FULL API Response:");
-            Serial.println(body.c_str());
-            Serial.println("[WpaSec] END Response");
-            
+            // Full unrecognised response to serial for debugging the failure.
+            LOG_W("WPASEC", "unhandled API response: %s", body.c_str());
+
             // Truncate for toast display only
             String toastMsg = body;
             if (toastMsg.length() > 40) {
@@ -281,7 +280,7 @@ int WpaSecService::fetchCrackedResults() {
     // Refuse to fetch (which sends the API key) over an unvalidatable TLS clock.
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        Serial.println("[WPA-SEC] Clock not NTP/GPS-synced — skipping results fetch");
+        LOG_W("WPASEC", "Clock not NTP/GPS-synced — skipping results fetch");
         return 0;
     }
 
@@ -304,7 +303,7 @@ int WpaSecService::fetchCrackedResults() {
 
     if (!http.begin(client, url)) {
         showErrorToast("HTTP begin failed");
-        Serial.println("[WPA-SEC] HTTPClient begin() failed");
+        LOG_E("WPASEC", "HTTPClient begin() failed");
         return 0;
     }
     
@@ -317,7 +316,7 @@ int WpaSecService::fetchCrackedResults() {
     
     // Check for HTTP errors
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[WPA-SEC] HTTP error: %s\n", http.errorToString(httpCode).c_str());
+        LOG_E("WPASEC", "HTTP error: %s", http.errorToString(httpCode).c_str());
         http.end();
         
         if (httpCode < 0) {
@@ -400,7 +399,7 @@ int WpaSecService::fetchCrackedResults() {
                 }
                 crackedBufferCount++;
             }
-            Serial.printf("[WPA-SEC] Cracked: %s - %s\n", ssid, password);
+            LOG_D("WPASEC", "Cracked: %s - %s", ssid, password);
         }
     };
     
@@ -446,9 +445,9 @@ int WpaSecService::fetchCrackedResults() {
             if (registry.setCrackedPassword(crackedBuffer[i].bssid, ssid,
                                             crackedBuffer[i].password)) {
                 appliedCount++;
-                Serial.printf("[WpaSec] Cracked applied: %s\n", ssid);
+                LOG_D("WPASEC", "Cracked applied: %s", ssid);
             } else {
-                Serial.printf("[WpaSec] Cracked result not on device: %s\n", ssid);
+                LOG_D("WPASEC", "Cracked result not on device: %s", ssid);
             }
         }
     }

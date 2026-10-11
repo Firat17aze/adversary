@@ -15,6 +15,7 @@
 
 #include "../../ui/components/toast_manager.h"
 #include "../../config/config.h"
+#include "utils/log.h"
 
 #if defined(ESP32) || defined(ARDUINO)
 #include <WiFi.h>
@@ -94,12 +95,12 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     }
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        Serial.println("[pwncrack] Clock not NTP/GPS-synced — skipping");
+        LOG_W("PWNCRACK", "Clock not NTP/GPS-synced — skipping");
         return false;
     }
     if (tls_upload::heapTooLowForTls()) {
         showErrorToast("Low heap, try again");
-        Serial.println("[pwncrack] Heap too low for TLS — skipping");
+        LOG_W("PWNCRACK", "Heap too low for TLS — skipping");
         return false;
     }
 
@@ -109,7 +110,7 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
 
     if (!tls_upload::connectWithRetry(client, PWNCRACK_HOST, PWNCRACK_PORT, "pwncrack")) {
         showErrorToast("Connection failed");
-        Serial.printf("[pwncrack] connect failed (heap: %lu)\n", ESP.getFreeHeap());
+        LOG_E("PWNCRACK", "connect failed (heap: %lu)", ESP.getFreeHeap());
         return false;
     }
 
@@ -177,9 +178,7 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     int sp = response.indexOf(' ');
     if (sp != -1) httpCode = response.substring(sp + 1, sp + 4).toInt();
 
-    Serial.println("[pwncrack] FULL upload response:");
-    Serial.println(response.c_str());
-    Serial.println("[pwncrack] END response");
+    LOG_D("PWNCRACK", "upload response: %s", response.c_str());
 
     String lower = response;
     lower.toLowerCase();
@@ -217,7 +216,7 @@ int PwncrackService::fetchCrackedResults(bool quiet) {
 
     if (!tls_upload::timeSyncedForTls()) {
         if (!quiet) showErrorToast("Time not synced");
-        Serial.println("[pwncrack] Clock not NTP/GPS-synced — skipping results fetch");
+        LOG_W("PWNCRACK", "Clock not NTP/GPS-synced — skipping results fetch");
         return 0;
     }
 
@@ -243,9 +242,9 @@ int PwncrackService::fetchCrackedResults(bool quiet) {
         // errorToString() only maps NEGATIVE HTTPClient codes; for a positive
         // HTTP status (404/403/...) it returns "" — hence the earlier blank log.
         // Always print the numeric code so the real cause is visible.
-        Serial.printf("[pwncrack] results fetch failed: HTTP %d (%s)\n",
-                      httpCode,
-                      httpCode < 0 ? http.errorToString(httpCode).c_str() : "server status");
+        LOG_E("PWNCRACK", "results fetch failed: HTTP %d (%s)",
+              httpCode,
+              httpCode < 0 ? http.errorToString(httpCode).c_str() : "server status");
         http.end();
         // 404 = no potfile for this key yet (nothing cracked). Benign, not an
         // error — don't shout, matching the "no results" wording used below.
@@ -343,7 +342,7 @@ int PwncrackService::fetchCrackedResults(bool quiet) {
             }
             crackedBufferCount++;
         }
-        Serial.printf("[pwncrack] Cracked: %s / %s\n", bssidStr, password);
+        LOG_D("PWNCRACK", "Cracked: %s / %s", bssidStr, password);
     };
 
     unsigned long timeout = millis();

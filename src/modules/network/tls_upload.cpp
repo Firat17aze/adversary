@@ -12,6 +12,7 @@
 #include <esp_heap_caps.h>
 #include "../../core/heap_policy.h"
 #include "../system/time_manager.h"
+#include "utils/log.h"
 
 // Default Mozilla root-CA bundle embedded in the precompiled mbedTLS lib
 // (x509_crt_bundle.S.obj in libmbedtls.a). Referencing it here pulls the bundle
@@ -64,15 +65,15 @@ bool connectWithRetry(WiFiClientSecure& client, const char* host, uint16_t port,
         // by-hostname connect below (which keeps SNI intact).
         if (WiFi.hostByName(host, ip) == 1 && ip != IPAddress((uint32_t)0)) {
             if (client.connect(host, port)) {
-                Serial.printf("[%s] Connected to %s:%u (attempt %d, %s)\n",
-                              tag, host, port, attempt, ip.toString().c_str());
+                LOG_I("TLS", "[%s] Connected to %s:%u (attempt %d, %s)",
+                      tag, host, port, attempt, ip.toString().c_str());
                 return true;
             }
-            Serial.printf("[%s] connect() to %s:%u failed (attempt %d/%d)\n",
-                          tag, host, port, attempt, MAX_ATTEMPTS);
+            LOG_W("TLS", "[%s] connect() to %s:%u failed (attempt %d/%d)",
+                  tag, host, port, attempt, MAX_ATTEMPTS);
         } else {
-            Serial.printf("[%s] DNS failed for %s (attempt %d/%d)\n",
-                          tag, host, attempt, MAX_ATTEMPTS);
+            LOG_W("TLS", "[%s] DNS failed for %s (attempt %d/%d)",
+                  tag, host, attempt, MAX_ATTEMPTS);
         }
 
         if (attempt < MAX_ATTEMPTS) {
@@ -92,16 +93,16 @@ bool streamFile(WiFiClientSecure& client, File& file, size_t fileSize,
     size_t bytesSent = 0;
     size_t nextLogAt = 0;  // heap trace every 32KB
 
-    Serial.printf("[%s] write start: size=%u free=%u largest=%u\n",
-                  tag, (unsigned)fileSize, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)largestFreeBlock());
+    LOG_D("TLS", "[%s] write start: size=%u free=%u largest=%u",
+          tag, (unsigned)fileSize, (unsigned)ESP.getFreeHeap(),
+          (unsigned)largestFreeBlock());
 
     while (bytesRemaining > 0) {
         // Periodic heap trace so a stalled/failed upload shows the curve.
         if (bytesSent >= nextLogAt) {
-            Serial.printf("[%s] write progress: sent=%u/%u free=%u largest=%u\n",
-                          tag, (unsigned)bytesSent, (unsigned)fileSize,
-                          (unsigned)ESP.getFreeHeap(), (unsigned)largestFreeBlock());
+            LOG_D("TLS", "[%s] write progress: sent=%u/%u free=%u largest=%u",
+                  tag, (unsigned)bytesSent, (unsigned)fileSize,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)largestFreeBlock());
             nextLogAt = bytesSent + 32768;
         }
 
@@ -117,8 +118,8 @@ bool streamFile(WiFiClientSecure& client, File& file, size_t fileSize,
                 yield();
             }
             if (ESP.getFreeHeap() < heap_policy::TLS_WRITE_HARD_FLOOR) {
-                Serial.printf("[%s] Heap floor hit mid-upload: sent=%u/%u free=%u — aborting\n",
-                              tag, (unsigned)bytesSent, (unsigned)fileSize, (unsigned)ESP.getFreeHeap());
+                LOG_E("TLS", "[%s] Heap floor hit mid-upload: sent=%u/%u free=%u — aborting",
+                      tag, (unsigned)bytesSent, (unsigned)fileSize, (unsigned)ESP.getFreeHeap());
                 if (outError && outErrorLen) snprintf(outError, outErrorLen, "Low heap @%uB", (unsigned)bytesSent);
                 file.close();
                 client.stop();
@@ -129,8 +130,8 @@ bool streamFile(WiFiClientSecure& client, File& file, size_t fileSize,
         if (!client.connected()) {
             char tlsErr[64] = {0};
             int errCode = client.lastError(tlsErr, sizeof(tlsErr) - 1);
-            Serial.printf("[%s] Connection lost: sent=%u/%u, err=%d (%s)\n",
-                          tag, (unsigned)bytesSent, (unsigned)fileSize, errCode, tlsErr);
+            LOG_E("TLS", "[%s] Connection lost: sent=%u/%u, err=%d (%s)",
+                  tag, (unsigned)bytesSent, (unsigned)fileSize, errCode, tlsErr);
             if (outError && outErrorLen) snprintf(outError, outErrorLen, "Conn lost @%uB", (unsigned)bytesSent);
             file.close();
             client.stop();
@@ -140,7 +141,7 @@ bool streamFile(WiFiClientSecure& client, File& file, size_t fileSize,
         size_t toRead = (bytesRemaining > CHUNK_SIZE) ? CHUNK_SIZE : bytesRemaining;
         size_t bytesRead = file.read(chunk, toRead);
         if (bytesRead == 0) {
-            Serial.printf("[%s] SD read failed at %u/%u\n", tag, (unsigned)bytesSent, (unsigned)fileSize);
+            LOG_E("TLS", "[%s] SD read failed at %u/%u", tag, (unsigned)bytesSent, (unsigned)fileSize);
             if (outError && outErrorLen) snprintf(outError, outErrorLen, "SD read @%uB", (unsigned)bytesSent);
             file.close();
             client.stop();
@@ -151,9 +152,9 @@ bool streamFile(WiFiClientSecure& client, File& file, size_t fileSize,
         if (written != bytesRead) {
             char tlsErr[64] = {0};
             int errCode = client.lastError(tlsErr, sizeof(tlsErr) - 1);
-            Serial.printf("[%s] TLS write failed: wrote=%u/%u, sent=%u/%u, err=%d (%s), conn=%d\n",
-                          tag, (unsigned)written, (unsigned)bytesRead,
-                          (unsigned)bytesSent, (unsigned)fileSize, errCode, tlsErr, client.connected());
+            LOG_E("TLS", "[%s] TLS write failed: wrote=%u/%u, sent=%u/%u, err=%d (%s), conn=%d",
+                  tag, (unsigned)written, (unsigned)bytesRead,
+                  (unsigned)bytesSent, (unsigned)fileSize, errCode, tlsErr, client.connected());
             if (outError && outErrorLen) snprintf(outError, outErrorLen, "TLS write @%uB", (unsigned)bytesSent);
             file.close();
             client.stop();

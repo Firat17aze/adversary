@@ -14,6 +14,7 @@
 #include "../../ui/components/toast_manager.h"
 #include "../../config/config.h"
 #include "tls_upload.h"
+#include "utils/log.h"
 
 #if defined(ESP32) || defined(ARDUINO)
 #include <WiFi.h>
@@ -53,12 +54,12 @@ bool WigleService::createSidecar(const char* filename) {
     
     File marker = SD.open(sidecarPath, FILE_WRITE);
     if (!marker) {
-        Serial.printf("[WiGLE] Failed to create sidecar: %s\n", sidecarPath);
+        LOG_E("WIGLE", "Failed to create sidecar: %s", sidecarPath);
         return false;
     }
     marker.println("uploaded");
     marker.close();
-    Serial.printf("[WiGLE] Created sidecar: %s\n", sidecarPath);
+    LOG_D("WIGLE", "Created sidecar: %s", sidecarPath);
     return true;
 #else
     (void)filename;
@@ -91,7 +92,7 @@ bool WigleService::uploadCSV(const char* filepath) {
     const char* filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
     
-    Serial.printf("[WiGLE] Upload starting: %s\n", filename);
+    LOG_I("WIGLE", "Upload starting: %s", filename);
     
     // Check if already uploaded (sidecar exists)
     if (getStatus(filename) == WigleStatus::UPLOADED) {
@@ -128,14 +129,14 @@ bool WigleService::uploadCSV(const char* filepath) {
     // No RTC: refuse TLS on a stale clock so a legit cert's dates still validate.
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        Serial.println("[WiGLE] Clock not NTP/GPS-synced — skipping (retry next sync)");
+        LOG_W("WIGLE", "Clock not NTP/GPS-synced — skipping (retry next sync)");
         return false;
     }
 
     // Gate on contiguous heap before allocating TLS buffers (fail fast / retry).
     if (tls_upload::heapTooLowForTls()) {
         showErrorToast("Low heap, try again");
-        Serial.println("[WiGLE] Heap too low for TLS — skipping (retry next sync)");
+        LOG_W("WIGLE", "Heap too low for TLS — skipping (retry next sync)");
         return false;
     }
 
@@ -145,12 +146,12 @@ bool WigleService::uploadCSV(const char* filepath) {
     tls_upload::applyCaBundle(client);
     client.setTimeout(15000);
     
-    Serial.printf("[WiGLE] Connecting to %s:%d (heap: %lu)\n", 
-                  WIGLE_HOST, WIGLE_PORT, ESP.getFreeHeap());
-    
+    LOG_I("WIGLE", "Connecting to %s:%d (heap: %lu)",
+          WIGLE_HOST, WIGLE_PORT, ESP.getFreeHeap());
+
     if (!tls_upload::connectWithRetry(client, WIGLE_HOST, WIGLE_PORT, "WiGLE")) {
         showErrorToast("Connection failed");
-        Serial.printf("[WiGLE] Connect failed (heap: %lu)\n", ESP.getFreeHeap());
+        LOG_E("WIGLE", "Connect failed (heap: %lu)", ESP.getFreeHeap());
         return false;
     }
     
@@ -220,8 +221,7 @@ bool WigleService::uploadCSV(const char* filepath) {
     }
     client.stop();
     
-    Serial.println("[WiGLE] Response received:");
-    Serial.println(response.substring(0, 500));
+    LOG_D("WIGLE", "Response received: %s", response.substring(0, 500).c_str());
     
     // Check for success
     // WiGLE API v2 returns JSON: {"success": true, ...}
@@ -250,8 +250,7 @@ bool WigleService::uploadCSV(const char* filepath) {
         String body = response.substring(bodyStart + 4);
         body.trim();
         
-        Serial.println("[WiGLE] Response body:");
-        Serial.println(body.substring(0, 500));
+        LOG_D("WIGLE", "Response body: %s", body.substring(0, 500).c_str());
         
         // Try to extract error message
         int msgStart = body.indexOf("\"message\":");
