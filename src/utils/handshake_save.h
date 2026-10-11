@@ -26,6 +26,7 @@
 #include "handshake_utils.h"
 #include "error_logger.h"
 #include "filename_utils.h"
+#include "utils/log.h"
 
 #ifdef ESP32
 #include "../ui/components/toast_manager.h"
@@ -129,7 +130,7 @@ inline bool writeHandshake22000(const char* ssid, const CapturedHandshake& hs,
 
     File file = SD.open(path, FILE_WRITE);
     if (!file) {
-        Serial.printf("[hc22000] Failed to open %s\n", path);
+        LOG_E("HC22000", "Failed to open %s", path);
         return false;
     }
     if (haveEapol) {
@@ -149,7 +150,7 @@ inline bool writeHandshake22000(const char* ssid, const CapturedHandshake& hs,
         file.print("***\n");
     }
     file.close();
-    Serial.printf("[hc22000] Wrote %s (eapol=%d pmkid=%d)\n", path, haveEapol, hasPMKID);
+    LOG_I("HC22000", "Wrote %s (eapol=%d pmkid=%d)", path, haveEapol, hasPMKID);
     return true;
 #else
     (void)ssid; (void)hs; (void)hasPMKID; (void)pmkid;
@@ -219,7 +220,7 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
             strncpy(preservedPassword, existingMeta->wpaSecPassword, sizeof(preservedPassword) - 1);
             preservedCrackedAt = existingMeta->wpaSecCrackedAt;
 #ifdef ESP32
-            Serial.printf("[HandshakeSave] Preserving cracked password for %s\n", hs.ssid);
+            LOG_D("HSSAVE", "Preserving cracked password for %s", hs.ssid);
 #endif
         }
     }
@@ -244,16 +245,16 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     int packetsWritten = 0;
     
 #ifdef ESP32
-    Serial.printf("[HandshakeSave] hasBeacon=%d beaconLen=%u\n", hs.hasBeacon(), (unsigned)hs.beaconData.size());
-    Serial.printf("[HandshakeSave] hasM1=%d M1Len=%u, hasM2=%d M2Len=%u\n", hs.hasMsg1, hs.msg1Len, hs.hasMsg2, hs.msg2Len);
-    Serial.printf("[HandshakeSave] hasM3=%d M3Len=%u, hasM4=%d M4Len=%u\n", hs.hasMsg3, hs.msg3Len, hs.hasMsg4, hs.msg4Len);
+    LOG_D("HSSAVE", "hasBeacon=%d beaconLen=%u", hs.hasBeacon(), (unsigned)hs.beaconData.size());
+    LOG_D("HSSAVE", "hasM1=%d M1Len=%u, hasM2=%d M2Len=%u", hs.hasMsg1, hs.msg1Len, hs.hasMsg2, hs.msg2Len);
+    LOG_D("HSSAVE", "hasM3=%d M3Len=%u, hasM4=%d M4Len=%u", hs.hasMsg3, hs.msg3Len, hs.hasMsg4, hs.msg4Len);
 #endif
     
     if (hs.hasBeacon()) {
         const size_t beaconLen = hs.beaconData.size();
         // Sanity check beacon size (should be < 512, > 10 at minimum)
         if (beaconLen > 512 || beaconLen < 10) {
-            Serial.printf("[HandshakeSave] WARNING: Suspicious beacon len: %u\n", (unsigned)beaconLen);
+            LOG_W("HSSAVE", "Suspicious beacon len: %u", (unsigned)beaconLen);
         }
         pcapWriter.writePacketWithRadiotap(hs.beaconData.data(), (uint16_t)beaconLen, timestamp++);
         packetsWritten++;
@@ -278,7 +279,7 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     pcapWriter.close();
     
 #ifdef ESP32
-    Serial.printf("[HandshakeSave] Wrote %d packets, %u bytes\n", packetsWritten, pcapWriter.getBytesWritten());
+    LOG_D("HSSAVE", "Wrote %d packets, %u bytes", packetsWritten, pcapWriter.getBytesWritten());
 #endif
     
     // Prepare metadata
@@ -313,28 +314,28 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     
     // GPS geolocation (if module detected and has valid fix)
 #ifdef ESP32
-    Serial.printf("[HandshakeSave] g_gpsDetected=%d\n", adversary::ui::g_gpsDetected);
+    LOG_D("HSSAVE", "g_gpsDetected=%d", adversary::ui::g_gpsDetected);
     if (adversary::ui::g_gpsDetected) {
         const auto& gpsData = GPSManager::getInstance().getCurrentData();
-        Serial.printf("[HandshakeSave] GPS lastUpdate=%lu, valid=%d, sats=%d, fix=%d\n", 
-                      gpsData.lastUpdateMs, gpsData.coordinate.valid, 
-                      gpsData.coordinate.satellites, gpsData.coordinate.fixQuality);
-        Serial.printf("[HandshakeSave] GPS lat=%.6f, lon=%.6f, alt=%.1f\n",
-                      gpsData.coordinate.latitude, gpsData.coordinate.longitude, 
-                      gpsData.coordinate.altitude);
-        
+        LOG_D("HSSAVE", "GPS lastUpdate=%lu, valid=%d, sats=%d, fix=%d",
+              gpsData.lastUpdateMs, gpsData.coordinate.valid,
+              gpsData.coordinate.satellites, gpsData.coordinate.fixQuality);
+        LOG_D("HSSAVE", "GPS lat=%.6f, lon=%.6f, alt=%.1f",
+              gpsData.coordinate.latitude, gpsData.coordinate.longitude,
+              gpsData.coordinate.altitude);
+
         if (gpsData.coordinate.valid) {
             metadata.hasGPS = true;
             metadata.latitude = gpsData.coordinate.latitude;
             metadata.longitude = gpsData.coordinate.longitude;
             metadata.altitude = gpsData.coordinate.altitude;
             metadata.satellites = gpsData.coordinate.satellites;
-            Serial.println("[HandshakeSave] GPS data saved to metadata!");
+            LOG_D("HSSAVE", "GPS data saved to metadata!");
         } else {
-            Serial.println("[HandshakeSave] GPS fix not valid - not saving");
+            LOG_D("HSSAVE", "GPS fix not valid - not saving");
         }
     } else {
-        Serial.println("[HandshakeSave] GPS module not detected");
+        LOG_D("HSSAVE", "GPS module not detected");
     }
 #endif
     
@@ -370,7 +371,7 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
         ToastManager::getInstance().show(toastMsg, ToastType::SUCCESS, ToastPriority::PRIORITY_MEDIUM, 2500);
     }
     
-    Serial.printf("[HandshakeSave] Saved: %s (%d packets)\n", filename, packetsWritten);
+    LOG_I("HSSAVE", "Saved: %s (%d packets)", filename, packetsWritten);
 #endif
     
     return result;
@@ -453,7 +454,7 @@ inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = t
         ToastManager::getInstance().show(toastMsg, ToastType::SUCCESS, ToastPriority::PRIORITY_MEDIUM, 2500);
     }
     
-    Serial.printf("[PMKIDSave] Saved: %s\n", filename);
+    LOG_I("PMKIDSAVE", "Saved: %s", filename);
 #else
     // Native build - just mark success
     strncpy(result.filename, filename, sizeof(result.filename) - 1);

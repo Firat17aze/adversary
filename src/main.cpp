@@ -52,6 +52,7 @@
 #include "assets/generated_icons.h"
 #include "utils/bitmap_remapper.h"
 #include "utils/screenshot.h"
+#include "utils/log.h"
 
 #if defined(TARGET_CARDPUTER)
 #include <M5Cardputer.h>
@@ -115,7 +116,7 @@ static M5Canvas* globalCanvas = nullptr;
  * @brief Stop all running attacks and modules to ensure clean WiFi state
  */
 void stopAllAttacks() {
-    Serial.println("[Main] Stopping all attacks/modules...");
+    LOG_I("MAIN", "Stopping all attacks/modules...");
     
     // Tear down whatever screen is active through its polymorphic lifecycle hook.
     // hide() is each screen's full teardown (stops its radio, releases its heap,
@@ -141,7 +142,7 @@ void stopAllAttacks() {
 #ifdef ESP32
     wifi_mode_t currentMode;
     if (esp_wifi_get_mode(&currentMode) == ESP_OK) {
-        Serial.println("[Main] Resetting WiFi state...");
+        LOG_D("MAIN", "Resetting WiFi state...");
         if (currentMode == WIFI_MODE_AP || currentMode == WIFI_MODE_APSTA) {
             WiFi.softAPdisconnect(true);
             delay(50);
@@ -149,14 +150,14 @@ void stopAllAttacks() {
         WiFi.disconnect(true);  // true = turn off WiFi radio
         WiFi.mode(WIFI_OFF);
     } else {
-        Serial.println("[Main] WiFi not initialized, skipping reset");
+        LOG_D("MAIN", "WiFi not initialized, skipping reset");
     }
 #endif
 
     // Give time for WiFi resources to be fully released
     delay(100);
 
-    Serial.println("[Main] All attacks stopped");
+    LOG_I("MAIN", "All attacks stopped");
 }
 
 /**
@@ -212,18 +213,18 @@ void redetectModules() {
     // mounted by the launcher (we don't own the SPIClass). A no-op once we own it;
     // a forced override needs no probe so it never pays this cost.
     if (ov == CapOverride::Auto && sd.spiBus() == nullptr) {
-        Serial.printf("[Modules] Claiming SD bus for cap probe: %s\n",
-                      sd.remount() ? "OK" : "FAILED");
+        LOG_D("MODULES", "Claiming SD bus for cap probe: %s",
+              sd.remount() ? "OK" : "FAILED");
     }
     ui::g_expansionCap = detectExpansionCap(ov);
     // The shared-bus cap probe desyncs the card's SPI state machine; re-mount to
     // re-sync it whenever the probe could have run (any non-forced-None override).
     if (ov != CapOverride::ForceNone) {
-        Serial.printf("[Modules] SD re-mount after cap probe: %s\n",
-                      sd.remount() ? "OK" : "FAILED");
+        LOG_D("MODULES", "SD re-mount after cap probe: %s",
+              sd.remount() ? "OK" : "FAILED");
     }
-    Serial.printf("[Modules] Cap: %s\n",
-                  ui::g_expansionCap == ExpansionCap::MultiRadio ? "Multi-Radio" : "None");
+    LOG_I("MODULES", "Cap: %s",
+          ui::g_expansionCap == ExpansionCap::MultiRadio ? "Multi-Radio" : "None");
 
     // --- GPS (cap-aware: never drive the cap-GPS UART pins when the cap owns them) ---
     const bool probeCapGps = ui::g_expansionCap != ExpansionCap::MultiRadio;
@@ -232,14 +233,14 @@ void redetectModules() {
     // --- RFID (skip only on the real Grove-port G1/G2 conflict with a Grove GPS) ---
     const char* gpsSource = GPSManager::getInstance().getDetectedPinSet();
     if (gps::gpsBlocksRfid(ui::g_gpsDetected, gpsSource)) {
-        Serial.println("[Modules] RFID skipped - Grove-port GPS owns GPIO 1/2");
+        LOG_W("MODULES", "RFID skipped - Grove-port GPS owns GPIO 1/2");
         ui::g_rfidDetected = false;
     } else {
         ui::g_rfidDetected = RFIDManager::getInstance().redetect();
     }
-    Serial.printf("[Modules] GPS:%s RFID:%s\n",
-                  ui::g_gpsDetected ? "detected" : "none",
-                  ui::g_rfidDetected ? "detected" : "none");
+    LOG_I("MODULES", "GPS:%s RFID:%s",
+          ui::g_gpsDetected ? "detected" : "none",
+          ui::g_rfidDetected ? "detected" : "none");
 }
 
 } // namespace adversary
@@ -250,12 +251,13 @@ void redetectModules() {
 void setup() {
     // Initialize serial for debugging
     Serial.begin(115200);
-    Serial.println("\n\n");
-    Serial.println("================================");
-    Serial.println("  THE ADVERSARY");
-    Serial.println("  Red Team Wireless Tool");
-    Serial.printf("  Version: %s\n", adversary::config::VERSION);
-    Serial.println("================================\n");
+    LOG_I("INIT",
+          "\n\n================================\n"
+          "  THE ADVERSARY\n"
+          "  Red Team Wireless Tool\n"
+          "  Version: %s\n"
+          "================================\n",
+          adversary::config::VERSION);
 
 #if defined(TARGET_CARDPUTER)
     // De-select every SPI peripheral that can share the SD bus BEFORE
@@ -294,12 +296,12 @@ void setup() {
     globalCanvas->setPsram(true); // Must be called before createSprite
 #endif
     if (globalCanvas->createSprite(adversary::config::SCREEN_WIDTH, adversary::config::SCREEN_HEIGHT) == nullptr) {
-        Serial.println("[Init] ERROR: Failed to create global canvas! Heap too low.");
+        LOG_E("INIT", "Failed to create global canvas! Heap too low.");
     } else {
-        Serial.printf("[Init] Created global canvas %dx%d (Internal: %u, PSRAM: %u)\n", 
-                      (int)adversary::config::SCREEN_WIDTH, (int)adversary::config::SCREEN_HEIGHT,
-                      (unsigned int)ESP.getFreeHeap(),
-                      (unsigned int)ESP.getFreePsram());
+        LOG_I("INIT", "Created global canvas %dx%d (Internal: %u, PSRAM: %u)",
+              (int)adversary::config::SCREEN_WIDTH, (int)adversary::config::SCREEN_HEIGHT,
+              (unsigned int)ESP.getFreeHeap(),
+              (unsigned int)ESP.getFreePsram());
     }
     
     // Transition to splash screen
@@ -316,15 +318,15 @@ void setup() {
     delay(100);
     
     if (!sdManager.init()) {
-        Serial.printf("SD Card Error: %s\n", adversary::sdStatusToString(sdManager.getStatus()));
+        LOG_W("INIT", "SD Card Error: %s", adversary::sdStatusToString(sdManager.getStatus()));
         splashScreen.updateProgress(0.25f, "SD: NOT FOUND!");
         delay(1500);
         // Continue anyway - some features won't work
     } else {
         adversary::SDCardInfo info = sdManager.getCardInfo();
-        Serial.printf("SD Card: %s, %.2f MB free\n", 
-                      info.type, 
-                      info.freeBytes / (1024.0 * 1024.0));
+        LOG_I("INIT", "SD Card: %s, %.2f MB free",
+              info.type,
+              info.freeBytes / (1024.0 * 1024.0));
         splashScreen.updateProgress(0.3f, "SD card ready");
         
         // Check and log if previous boot was a crash
@@ -444,7 +446,7 @@ void setup() {
 
     showMenu();
 
-    Serial.println("Initialization complete. Entering main loop.");
+    LOG_I("INIT", "Initialization complete. Entering main loop.");
 }
 
 /**
@@ -484,7 +486,7 @@ void loop() {
         // Update global flag (may have been detected by background task)
         if (!adversary::ui::g_gpsDetected) {
             adversary::ui::g_gpsDetected = true;
-            Serial.println("[Main] GPS detected by background task - enabling updates");
+            LOG_I("MAIN", "GPS detected by background task - enabling updates");
         }
         gps.update();
     }
@@ -495,7 +497,7 @@ void loop() {
     static uint32_t lastHeartbeat = 0;
     if (millis() - lastHeartbeat > 5000) {
         lastHeartbeat = millis();
-        Serial.printf("[Main] Loop heartbeat. Heap: %u\n", (unsigned int)ESP.getFreeHeap());
+        LOG_D("MAIN", "Loop heartbeat. Heap: %u", (unsigned int)ESP.getFreeHeap());
     }
 
     // Screen-specific updates via adversary::ScreenManager
@@ -540,13 +542,13 @@ void initHardware() {
     // Initialize M5Cardputer with keyboard enabled
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);  // true = enable keyboard
-    Serial.println("[Init] M5Cardputer initialized with keyboard");
+    LOG_I("INIT", "M5Cardputer initialized with keyboard");
 #elif defined(TARGET_M5STICK)
     // Initialize M5Unified for M5StickCPlus2
     auto cfg = M5.config();
     cfg.internal_imu = true;
     M5.begin(cfg);
-    Serial.println("[Init] M5StickCPlus2 initialized via M5Unified");
+    LOG_I("INIT", "M5StickCPlus2 initialized via M5Unified");
 #else
     // Initialize M5 unified library for other targets
     auto cfg = M5.config();
@@ -594,7 +596,7 @@ void adversary::initializeMenu() {
  * @brief Show main menu
  */
 void showMenu() {
-    Serial.println("[Main] showMenu() called");
+    LOG_D("MAIN", "showMenu() called");
     if (globalCanvas) {
         if (mainMenu.isAtRoot()) {
             carouselMenu.render(*globalCanvas);
@@ -606,13 +608,13 @@ void showMenu() {
         adversary::ToastManager::getInstance().render(*globalCanvas);
         
         if (globalCanvas->getBuffer()) {
-            Serial.println("[Main] Pushing menu to display...");
+            LOG_D("MAIN", "Pushing menu to display...");
             globalCanvas->pushSprite(0, 0);
         } else {
-            Serial.println("[Main] ERROR: Canvas buffer is NULL (restoration failed)");
+            LOG_E("MAIN", "Canvas buffer is NULL (restoration failed)");
         }
     } else {
-        Serial.println("[Main] ERROR: globalCanvas is NULL!");
+        LOG_E("MAIN", "globalCanvas is NULL!");
     }
 }
 
@@ -684,9 +686,9 @@ void handleInput() {
         }
         
         // Debug output
-        Serial.printf("[Input] Key pressed: '%c' (0x%02X), enter=%d, del=%d, tab=%d\n",
-                      (pressedKey >= 32 && pressedKey < 127) ? pressedKey : '?',
-                      (uint8_t)pressedKey, state.enter, state.del, state.tab);
+        LOG_D("INPUT", "Key pressed: '%c' (0x%02X), enter=%d, del=%d, tab=%d",
+              (pressedKey >= 32 && pressedKey < 127) ? pressedKey : '?',
+              (uint8_t)pressedKey, state.enter, state.del, state.tab);
         
         // Normalize modifier state + pressed key into the routing char (slice-0030).
         char key = adversary::normalizeCardputerKey(state.enter, state.del, pressedKey);
@@ -731,7 +733,7 @@ void handleInput() {
     InputAction action = Input().getAction();
     
     if (action != InputAction::NONE) {
-        Serial.printf("[M5Stick] InputAction: %d\n", static_cast<int>(action));
+        LOG_D("INPUT", "InputAction: %d", static_cast<int>(action));
         
         // Map the logical action to the routing char (slice-0030).
         char pressedKey = adversary::inputActionToKey(action);
@@ -763,7 +765,7 @@ void handleInput() {
  * @brief Handle menu action selection
  */
 void handleMenuAction(int actionId) {
-    Serial.printf("[Main] handleMenuAction: %d\n", actionId);
+    LOG_D("MAIN", "handleMenuAction: %d", actionId);
 
     // Stop any running attacks/modules before starting the next one. Runs once for every
     // action — the six arms that used to repeat this call (BadBLE/BadUSB/etc.) were redundant.
@@ -775,7 +777,7 @@ void handleMenuAction(int actionId) {
     // ui/menu_routes.{h,cpp} (slice-0029).
     const adversary::MenuRoute* route = adversary::findMenuRoute(actionId);
     if (!route) {
-        Serial.printf("[Main] Unknown action: %d\n", actionId);
+        LOG_W("MAIN", "Unknown action: %d", actionId);
         return;
     }
     // The RFID screen hosts both Read/Audit and Write; this one-shot intent tells show() to open
@@ -791,14 +793,14 @@ void handleMenuAction(int actionId) {
 
 void adversary_ui_purge_canvas() {
     if (globalCanvas) {
-        Serial.println("[UI] Purging global canvas to free contiguous RAM...");
+        LOG_D("UI", "Purging global canvas to free contiguous RAM...");
         globalCanvas->deleteSprite();
     }
 }
 
 void adversary_ui_restore_canvas() {
     if (globalCanvas && !globalCanvas->getBuffer()) {
-        Serial.println("[UI] Restoring global canvas...");
+        LOG_D("UI", "Restoring global canvas...");
         
         // Release adversary::EventBus queue memory — the ~2.8KB vector can fragment heap
         adversary::EventBus::getInstance().releaseMemory();
@@ -809,42 +811,42 @@ void adversary_ui_restore_canvas() {
         }
 
         // Stage 2: WiFi.mode(WIFI_OFF)
-        Serial.println("[UI] Stage 2: Releasing WiFi radio...");
+        LOG_W("UI", "Stage 2: Releasing WiFi radio...");
         WiFi.mode(WIFI_OFF);
         delay(200);
         if (globalCanvas->createSprite(adversary::config::SCREEN_WIDTH, adversary::config::SCREEN_HEIGHT) != nullptr) {
-            Serial.println("[UI] Canvas restored (Stage 2)");
+            LOG_I("UI", "Canvas restored (Stage 2)");
             return;
         }
 
         // Stage 3: Full WiFi stack deinit
-        Serial.println("[UI] Stage 3: FULL WiFi stack deinit...");
+        LOG_W("UI", "Stage 3: FULL WiFi stack deinit...");
         esp_wifi_stop();
         delay(100);
         esp_wifi_deinit();
         delay(300);
-        
+
         if (globalCanvas->createSprite(adversary::config::SCREEN_WIDTH, adversary::config::SCREEN_HEIGHT) != nullptr) {
-            Serial.println("[UI] Canvas restored (Stage 3)");
+            LOG_I("UI", "Canvas restored (Stage 3)");
             return;
         }
 
         // Stage 4: Retry with yields — background tasks may free temporary buffers
-        Serial.println("[UI] Stage 4: Retry with yields...");
+        LOG_W("UI", "Stage 4: Retry with yields...");
         for (int i = 0; i < 5; i++) {
             delay(200);
             yield();
             if (globalCanvas->createSprite(adversary::config::SCREEN_WIDTH, adversary::config::SCREEN_HEIGHT) != nullptr) {
-                Serial.printf("[UI] Canvas restored (Stage 4, retry %d)\n", i + 1);
+                LOG_I("UI", "Canvas restored (Stage 4, retry %d)", i + 1);
                 return;
             }
         }
 
         size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        Serial.println("[UI] ERROR: Failed to restore global canvas after all attempts!");
-        Serial.printf("[UI] Fragmentation critical: Free heap: %u, Largest block: %u, Need: %u\n", 
-                        (unsigned int)ESP.getFreeHeap(), (unsigned int)largestBlock,
-                        (unsigned int)(adversary::config::SCREEN_WIDTH * adversary::config::SCREEN_HEIGHT * 2));
+        LOG_E("UI", "Failed to restore global canvas after all attempts! "
+                    "Free heap: %u, Largest block: %u, Need: %u",
+              (unsigned int)ESP.getFreeHeap(), (unsigned int)largestBlock,
+              (unsigned int)(adversary::config::SCREEN_WIDTH * adversary::config::SCREEN_HEIGHT * 2));
     }
 }
 

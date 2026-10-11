@@ -13,6 +13,7 @@
 #include "config/config.h"
 #include "hal/storage/sd_manager.h"
 #include "utils/bmp_header.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -23,19 +24,19 @@ constexpr int MAX_SCREENSHOTS = 1000;  // shot_000 .. shot_999
 
 bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPathLen) {
     if (!sd.isReady()) {
-        Serial.println("[Screenshot] SD not ready");
+        LOG_W("SHOT", "SD not ready");
         return false;
     }
 
     const uint16_t width = static_cast<uint16_t>(canvas.width());
     const uint16_t height = static_cast<uint16_t>(canvas.height());
     if (width == 0 || height == 0 || canvas.getBuffer() == nullptr) {
-        Serial.println("[Screenshot] Canvas not ready");
+        LOG_W("SHOT", "Canvas not ready");
         return false;
     }
 
     if (!sd.directoryExists(SCREENSHOT_DIR) && !sd.createDirectory(SCREENSHOT_DIR)) {
-        Serial.printf("[Screenshot] Could not create %s\n", SCREENSHOT_DIR);
+        LOG_E("SHOT", "Could not create %s", SCREENSHOT_DIR);
         return false;
     }
 
@@ -51,7 +52,7 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
         }
     }
     if (index < 0) {
-        Serial.printf("[Screenshot] No free slot (>= %d files)\n", MAX_SCREENSHOTS);
+        LOG_W("SHOT", "No free slot (>= %d files)", MAX_SCREENSHOTS);
         return false;
     }
 
@@ -65,8 +66,8 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
     // per row, which SDManager::appendFile() would do.
     File file = SD.open(path, FILE_WRITE);
     if (!file) {
-        Serial.printf("[Screenshot] Could not open %s for write, free heap %u\n",
-                      path, (unsigned)ESP.getFreeHeap());
+        LOG_E("SHOT", "Could not open %s for write, free heap %u",
+              path, (unsigned)ESP.getFreeHeap());
         return false;
     }
 
@@ -75,7 +76,7 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
     auto abortWrite = [&](const char* why) -> bool {
         file.close();
         SD.remove(path);
-        Serial.printf("[Screenshot] %s (free heap %u)\n", why, (unsigned)ESP.getFreeHeap());
+        LOG_E("SHOT", "%s (free heap %u)", why, (unsigned)ESP.getFreeHeap());
         return false;
     };
 
@@ -109,7 +110,7 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
     free(row);
     file.close();
 
-    Serial.printf("[Screenshot] Saved %s (%u bytes)\n", path, (unsigned)fileSize);
+    LOG_I("SHOT", "Saved %s (%u bytes)", path, (unsigned)fileSize);
     if (outPath != nullptr && outPathLen > 0) {
         strncpy(outPath, path, outPathLen - 1);
         outPath[outPathLen - 1] = '\0';

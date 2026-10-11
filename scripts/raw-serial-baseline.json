@@ -1,6 +1,1 @@
-[
-  "src/main.cpp",
-  "src/utils/handshake_save.h",
-  "src/utils/raw_wifi.cpp",
-  "src/utils/screenshot.cpp"
-]
+[]

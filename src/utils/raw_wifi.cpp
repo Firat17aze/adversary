@@ -7,6 +7,7 @@
 
 #ifdef ESP32
 #include <Arduino.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -36,15 +37,14 @@ TxResult RawWiFi::transmit(WiFiInterface iface, const uint8_t* data, size_t leng
     } else {
         s_totalErrors++;
         if (s_debugLogging) {
-            const char* ifaceName = (iface == WiFiInterface::AP) ? "AP" : "STA";
-            Serial.printf("[RawWiFi] TX failed on %s: err=%d len=%zu\n", 
-                         ifaceName, err, length);
+            LOG_D("RAWWIFI", "TX failed on %s: err=%d len=%zu",
+                  (iface == WiFiInterface::AP) ? "AP" : "STA", err, length);
         }
     }
-    
+
     if (s_debugLogging && result.success) {
-        const char* ifaceName = (iface == WiFiInterface::AP) ? "AP" : "STA";
-        Serial.printf("[RawWiFi] TX %s: %zu bytes\n", ifaceName, length);
+        LOG_D("RAWWIFI", "TX %s: %zu bytes",
+              (iface == WiFiInterface::AP) ? "AP" : "STA", length);
     }
 #else
     (void)iface;
@@ -72,7 +72,7 @@ void RawWiFi::setDebugLogging(bool enabled) {
     s_debugLogging = enabled;
 #ifdef ESP32
     if (enabled) {
-        Serial.println("[RawWiFi] Debug logging enabled");
+        LOG_D("RAWWIFI", "Debug logging enabled");
     }
 #endif
 }
