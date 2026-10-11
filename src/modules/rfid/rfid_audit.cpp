@@ -278,13 +278,6 @@ int RfidAudit::runDictionaryAttack(
                 progressLine.elapsedMs = millis() - auditStartMs;
                 onProgress(progressLine);
             }
-            
-            // Periodically re-select to keep card alive if many failures
-            if (k % 4 == 3) {
-                m_rfid->PCD_StopCrypto1();
-                m_rfid->PICC_IsNewCardPresent();
-                m_rfid->PICC_ReadCardSerial();
-            }
         }
         
         // Try Key B
