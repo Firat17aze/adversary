@@ -1,5 +1,6 @@
 #include "karma_ap.h"
 #include "../../utils/wifi_utils.h"
+#include "utils/log.h"
 #include <cstring>
 #include <algorithm>
 
@@ -95,7 +96,7 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     triedSSIDs_.clear();  // Don't carry SSID-cooldown entries across sessions
 
 #ifndef UNIT_TEST
-    Serial.println("[KarmaAP] Starting active mode...");
+    LOG_I("KARMA", "Starting active mode...");
     
     // Save STA credentials before mode switch (mode switch may disconnect)
     String savedSSID = WiFi.SSID();
@@ -103,12 +104,12 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     bool wasConnected = WiFi.isConnected();
     
     if (wasConnected) {
-        Serial.printf("[KarmaAP] Saving STA connection to %s for reconnect\n", savedSSID.c_str());
+        LOG_I("KARMA", "Saving STA connection to %s for reconnect", savedSSID.c_str());
     }
     
     // Switch to AP+STA mode
     if (!WiFi.mode(WIFI_AP_STA)) {
-        Serial.println("[KarmaAP] ERROR: Failed to set AP+STA mode!");
+        LOG_E("KARMA", "Failed to set AP+STA mode!");
         state_ = KarmaState::ERROR;
         return false;
     }
@@ -116,7 +117,7 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     
     // Reconnect STA if we were connected
     if (wasConnected && savedSSID.length() > 0) {
-        Serial.printf("[KarmaAP] Reconnecting to %s...\n", savedSSID.c_str());
+        LOG_I("KARMA", "Reconnecting to %s...", savedSSID.c_str());
         WiFi.begin(savedSSID.c_str(), savedPSK.c_str());
         
         // Wait for reconnection with timeout (required for traffic proxy)
@@ -126,9 +127,9 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
         }
         
         if (WiFi.isConnected()) {
-            Serial.printf("[KarmaAP] STA reconnected! IP: %s\n", WiFi.localIP().toString().c_str());
+            LOG_I("KARMA", "STA reconnected! IP: %s", WiFi.localIP().toString().c_str());
         } else {
-            Serial.println("[KarmaAP] WARNING: STA reconnection timeout - traffic proxy may not work");
+            LOG_W("KARMA", "STA reconnection timeout - traffic proxy may not work");
         }
     }
     
@@ -137,9 +138,9 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     
     // Start soft AP - open network
     uint8_t channel = adversary::SettingsManager::getInstance().get().wireless.karmaChannel;
-    Serial.printf("[KarmaAP] Creating AP: %s on channel %d\n", currentSSID_, channel);
+    LOG_I("KARMA", "Creating AP: %s on channel %d", currentSSID_, channel);
     if (!WiFi.softAP(currentSSID_, nullptr, channel, 0, 8)) {
-        Serial.println("[KarmaAP] ERROR: Failed to start SoftAP!");
+        LOG_E("KARMA", "Failed to start SoftAP!");
         state_ = KarmaState::ERROR;
         return false;
     }
@@ -149,7 +150,7 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     esp_wifi_set_inactive_time(WIFI_IF_AP, 10);
     
     IPAddress apIP = WiFi.softAPIP();
-    Serial.printf("[KarmaAP] AP started! IP: %s\n", apIP.toString().c_str());
+    LOG_I("KARMA", "AP started! IP: %s", apIP.toString().c_str());
     
     // Start Arduino captive portal (DNS + HTTP) if enabled
     if (portalConfig_.enableCaptivePortal) {
@@ -157,17 +158,17 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
         const char* portalTitle = portalConfig_.customTitle[0] != '\0' ? 
             portalConfig_.customTitle : "Free WiFi - Login";
         if (!arduinoPortal_.start(portalTitle)) {
-            Serial.println("[KarmaAP] ERROR: Failed to start captive portal!");
+            LOG_E("KARMA", "Failed to start captive portal!");
             WiFi.softAPdisconnect(true);
             state_ = KarmaState::ERROR;
             return false;
         }
         arduinoPortal_.setSSID(currentSSID_);  // Set SSID for credential filename
         arduinoPortal_.setPageType(portalConfig_.pageType);  // Set portal template (Generic/Google)
-        Serial.printf("[KarmaAP] Captive portal started with pageType: %d\n", 
-                      static_cast<int>(portalConfig_.pageType));
+        LOG_I("KARMA", "Captive portal started with pageType: %d",
+              static_cast<int>(portalConfig_.pageType));
     } else {
-        Serial.println("[KarmaAP] Traffic routing mode - captive portal disabled");
+        LOG_I("KARMA", "Traffic routing mode - captive portal disabled");
     }
     
     // Now enable promiscuous mode for probe capture
@@ -175,7 +176,7 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     // IMPORTANT: Set explicit filter to avoid inheriting stale filter from other modules
     auto filter = adversary::wifi_utils::managementFrameFilter();
     adversary::wifi_utils::enablePromiscuous(probeCallback, &filter);
-    Serial.println("[KarmaAP] Probe capture enabled");
+    LOG_I("KARMA", "Probe capture enabled");
 #endif
     
     state_ = KarmaState::ACTIVE;
@@ -184,7 +185,7 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
     strncpy(currentSSID_, "FreeWiFi", sizeof(currentSSID_) - 1);
     
 #ifndef UNIT_TEST
-    Serial.println("[KarmaAP] Active mode running!");
+    LOG_I("KARMA", "Active mode running!");
 #endif
     
     return true;
@@ -196,7 +197,7 @@ void KarmaAP::stop() {
     }
     
 #ifndef UNIT_TEST
-    Serial.println("[KarmaAP] Stopping...");
+    LOG_I("KARMA", "Stopping...");
     
     // Stop promiscuous mode
     adversary::wifi_utils::disablePromiscuous();
@@ -217,7 +218,7 @@ void KarmaAP::stop() {
     WiFi.mode(WIFI_OFF);
     delay(50);
 
-    Serial.println("[KarmaAP] Stopped (WiFi OFF)");
+    LOG_I("KARMA", "Stopped (WiFi OFF)");
 #endif
 
     // Release session-scoped containers so nothing accumulates across
@@ -318,7 +319,7 @@ void KarmaAP::rotateSSID() {
     // All SSIDs either current or on cooldown
     if (newSSID == nullptr) {
 #ifndef UNIT_TEST
-        Serial.println("[KarmaAP] All SSIDs on cooldown, staying on current");
+        LOG_D("KARMA", "All SSIDs on cooldown, staying on current");
 #endif
         return;
     }
@@ -334,7 +335,7 @@ void KarmaAP::rotateSSID() {
     uint8_t channel = adversary::SettingsManager::getInstance().get().wireless.karmaChannel;
     
     // Restart AP with new SSID (quick disconnect + reconnect)
-    Serial.printf("[KarmaAP] Rotating to SSID: %s (ch:%d)\n", currentSSID_, channel);
+    LOG_I("KARMA", "Rotating to SSID: %s (ch:%d)", currentSSID_, channel);
     WiFi.softAPdisconnect(false);  // Don't turn off WiFi
     delay(50);
     WiFi.softAP(currentSSID_, nullptr, channel, 0, 8);
@@ -348,15 +349,15 @@ void KarmaAP::rotateSSID() {
     if (ap_netif != nullptr) {
         esp_err_t err = esp_netif_napt_enable(ap_netif);
         if (err == ESP_OK) {
-            Serial.println("[KarmaAP] NAPT re-enabled after rotation");
+            LOG_D("KARMA", "NAPT re-enabled after rotation");
         } else {
             // Fallback to legacy API
-            Serial.printf("[KarmaAP] esp_netif failed (%s), trying legacy API\n", esp_err_to_name(err));
+            LOG_W("KARMA", "esp_netif failed (%s), trying legacy API", esp_err_to_name(err));
             IPAddress softApIp = WiFi.softAPIP();
             LOCK_TCPIP_CORE();
             ip_napt_enable(softApIp, 1);
             UNLOCK_TCPIP_CORE();
-            Serial.println("[KarmaAP] NAPT re-enabled via legacy API");
+            LOG_D("KARMA", "NAPT re-enabled via legacy API");
         }
     }
 #endif
@@ -498,10 +499,10 @@ void KarmaAP::handleProbe(const uint8_t* clientMAC, const char* ssid, int8_t rss
             
 #ifndef UNIT_TEST
             // Debug: Log new probe captured
-            Serial.printf("[KarmaAP] New probe: %02X:%02X:%02X:%02X:%02X:%02X -> '%s' (RSSI:%d, total:%zu)\n",
-                          clientMAC[0], clientMAC[1], clientMAC[2],
-                          clientMAC[3], clientMAC[4], clientMAC[5],
-                          ssid, rssi, probes_.size());
+            LOG_D("KARMA", "New probe: %02X:%02X:%02X:%02X:%02X:%02X -> '%s' (RSSI:%d, total:%zu)",
+                  clientMAC[0], clientMAC[1], clientMAC[2],
+                  clientMAC[3], clientMAC[4], clientMAC[5],
+                  ssid, rssi, probes_.size());
 #endif
             
             // Publish probe event via EventBus (ISR-safe)
@@ -714,8 +715,8 @@ const std::vector<ap::CapturedCredential>& KarmaAP::getCredentials() const {
     const auto& arduinoCreds = arduinoPortal_.getCredentials();
     
 #ifndef UNIT_TEST
-    Serial.printf("[KarmaAP] getCredentials: arduinoPortal_=%p, has %zu creds, stats says %lu\n", 
-                  (void*)&arduinoPortal_, arduinoCreds.size(), stats_.credentialsCaptured);
+    LOG_D("KARMA", "getCredentials: arduinoPortal_=%p, has %zu creds, stats says %lu",
+          (void*)&arduinoPortal_, arduinoCreds.size(), stats_.credentialsCaptured);
 #endif
     
     for (const auto& cred : arduinoCreds) {

@@ -7,6 +7,7 @@
 #include "../../core/event_bus.h"
 #include "../../utils/wifi_utils.h"
 #include "../../utils/raw_wifi.h"
+#include "utils/log.h"
 #include <cstdlib>
 
 #ifdef ARDUINO
@@ -128,7 +129,7 @@ bool BeaconSpam::init() {
     if (initialized_) return true;
     
 #ifdef ESP32
-    Serial.println("[BeaconSpam] Initializing...");
+    LOG_I("BEACON", "Initializing...");
 #endif
     
     initialized_ = true;
@@ -195,9 +196,9 @@ bool BeaconSpam::start(const BeaconSpamConfig& config) {
     
     stats_.startTime = millis();
     
-    Serial.printf("[BeaconSpam] Started on channel %d\n", config_.channel);
-    Serial.printf("[BeaconSpam] Mode: %s (%zu SSIDs)\n", 
-                  getBeaconSpamModeName(config_.mode), ssidList_.size());
+    LOG_I("BEACON", "Started on channel %d", config_.channel);
+    LOG_I("BEACON", "Mode: %s (%zu SSIDs)",
+          getBeaconSpamModeName(config_.mode), ssidList_.size());
 #endif
     
     setState(BeaconSpamState::RUNNING);
@@ -214,7 +215,7 @@ void BeaconSpam::stop() {
     WiFi.mode(WIFI_OFF);
     delay(50);
     
-    Serial.printf("[BeaconSpam] Stopped. Sent %u beacons\n", stats_.beaconsSent);
+    LOG_I("BEACON", "Stopped. Sent %u beacons", stats_.beaconsSent);
 #endif
     
     setState(BeaconSpamState::IDLE);

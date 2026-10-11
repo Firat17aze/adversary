@@ -2,6 +2,7 @@
 #include "core/event_bus.h"
 #include "../../utils/wifi_utils.h"
 #include "../../utils/raw_wifi.h"
+#include "utils/log.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -97,9 +98,9 @@ bool DeauthAttack::init() {
     // Test if the WSL (Wireless Security Level) bypass is working
     bypassEnabled_ = testBypassEnabled();
     if (bypassEnabled_) {
-        Serial.println("[Deauth] WSL bypass ENABLED - deauth frames allowed");
+        LOG_I("DEAUTH", "WSL bypass ENABLED - deauth frames allowed");
     } else {
-        Serial.println("[Deauth] WSL bypass FAILED - deauth frames may be blocked by SDK");
+        LOG_W("DEAUTH", "WSL bypass FAILED - deauth frames may be blocked by SDK");
     }
     
     // WiFi should already be initialized by the sniffer or scanner
@@ -155,11 +156,11 @@ bool DeauthAttack::start(const DeauthConfig& config) {
     // Enable promiscuous mode for raw frame TX
     esp_wifi_set_promiscuous(true);  // Direct call needed - no filter for TX only
     
-    Serial.printf("[Deauth] Started on channel %d, BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  config_.channel,
-                  config_.apBssid[0], config_.apBssid[1], config_.apBssid[2],
-                  config_.apBssid[3], config_.apBssid[4], config_.apBssid[5]);
-    Serial.println("[Deauth] Note: ESP32-S3 may block deauth frames in SDK");
+    LOG_I("DEAUTH", "Started on channel %d, BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
+          config_.channel,
+          config_.apBssid[0], config_.apBssid[1], config_.apBssid[2],
+          config_.apBssid[3], config_.apBssid[4], config_.apBssid[5]);
+    LOG_I("DEAUTH", "Note: ESP32-S3 may block deauth frames in SDK");
 #endif
     
     lastPacketTime_ = 0;
@@ -183,7 +184,7 @@ void DeauthAttack::stop() {
     WiFi.mode(WIFI_OFF);
     delay(50);
     
-    Serial.println("[Deauth] Stopped");
+    LOG_I("DEAUTH", "Stopped");
 #endif
 }
 
@@ -319,8 +320,8 @@ bool DeauthAttack::sendRawFrame(const uint8_t* frame, size_t length) {
         // Only log every 10th error to avoid spam
         static uint32_t errorCount = 0;
         if (++errorCount % 10 == 1) {
-            Serial.printf("[Deauth] TX error: %d (frame: 0x%02X), count: %lu\n", 
-                          result.errorCode, frame[0], (unsigned long)errorCount);
+            LOG_W("DEAUTH", "TX error: %d (frame: 0x%02X), count: %lu",
+                  result.errorCode, frame[0], (unsigned long)errorCount);
         }
     }
     

