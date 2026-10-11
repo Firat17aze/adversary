@@ -105,16 +105,5 @@ constexpr uint8_t TASK_PRIORITY_NORMAL = 2;
 constexpr uint8_t TASK_PRIORITY_HIGH = 3;
 constexpr uint8_t TASK_PRIORITY_CRITICAL = 4;
 
-// ===========================================
-// Debug Configuration
-// ===========================================
-#if CORE_DEBUG_LEVEL > 0
-    #define DEBUG_ENABLED 1
-#else
-    #define DEBUG_ENABLED 0
-#endif
-
-#define LOG_TAG "ADV"
-
 } // namespace config
 } // namespace adversary

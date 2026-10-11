@@ -11,9 +11,7 @@
 #include <time.h>
 #include "../system/time_manager.h"
 
-// Logging macros
-#define LOG_I(fmt, ...) Serial.printf("[INFO] " fmt "\n", ##__VA_ARGS__)
-#define LOG_E(fmt, ...) Serial.printf("[ERROR] " fmt "\n", ##__VA_ARGS__)
+#include "utils/log.h"
 
 namespace adversary {
 namespace wardriving {
@@ -29,7 +27,7 @@ bool WardrivingExporter::exportToCSV(
 ) {
     File csvFile = SD.open(outputPath, FILE_WRITE);
     if (!csvFile) {
-        LOG_E("[Exporter] Failed to create CSV: %s", outputPath);
+        LOG_E("EXPORT", "Failed to create CSV: %s", outputPath);
         return false;
     }
     
@@ -87,11 +85,11 @@ bool WardrivingExporter::exportToCSV(
     
     // Log with GPS stats
     if (networksWithGPS == 0 && networks.size() > 0) {
-        LOG_E("[Exporter] CSV exported: %s - WARNING: 0/%u networks have GPS!", 
+        LOG_E("EXPORT", "CSV exported: %s - WARNING: 0/%u networks have GPS!", 
               outputPath, networks.size());
-        LOG_E("[Exporter] CSV will only contain headers - GPS fix was never acquired");
+        LOG_E("EXPORT", "CSV will only contain headers - GPS fix was never acquired");
     } else {
-        LOG_I("[Exporter] CSV exported: %s (%u/%u networks with GPS)", 
+        LOG_I("EXPORT", "CSV exported: %s (%u/%u networks with GPS)", 
               outputPath, networksWithGPS, networks.size());
     }
     
@@ -110,11 +108,11 @@ bool WardrivingExporter::exportToJSON(
     // Open file for writing
     File jsonFile = SD.open(outputPath, FILE_WRITE);
     if (!jsonFile) {
-        LOG_E("[Exporter] Failed to create JSON: %s", outputPath);
+        LOG_E("EXPORT", "Failed to create JSON: %s", outputPath);
         return false;
     }
     
-    LOG_I("[Exporter] Writing JSON with %u networks (streaming mode)...", networks.size());
+    LOG_I("EXPORT", "Writing JSON with %u networks (streaming mode)...", networks.size());
     
     // Write JSON manually to avoid massive heap allocation
     // For hundreds of networks, DynamicJsonDocument would need 150KB+
@@ -186,7 +184,7 @@ bool WardrivingExporter::exportToJSON(
     
     jsonFile.close();
     
-    LOG_I("[Exporter] JSON exported: %s (%u networks)", outputPath, networks.size());
+    LOG_I("EXPORT", "JSON exported: %s (%u networks)", outputPath, networks.size());
     return true;
 }
 

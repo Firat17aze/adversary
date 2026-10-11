@@ -126,3 +126,19 @@ jobs:
 
       - name: Lint src for literal escapes
         run: node scripts/lint-serial-escapes.mjs src
+
+  # Ratchet that forbids NEW raw Serial.print* outside the logging layer, so the raw-Serial
+  # sprawl cannot grow while the legacy sites migrate behind LOG_E/W/I/D. The permitted
+  # legacy files are listed in scripts/raw-serial-baseline.json, which may only shrink as
+  # modules convert. See ADR-0051 / slices/0052.
+  raw-serial:
+    name: raw-serial
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Self-test the lint
+        run: node --test scripts/lint-raw-serial.test.mjs
+
+      - name: Lint src for new raw Serial.print*
+        run: node scripts/lint-raw-serial.mjs src

@@ -14,10 +14,7 @@
 #include <time.h>
 #include "../system/time_manager.h"
 
-// Logging macros
-#define LOG_I(fmt, ...) Serial.printf("[INFO] " fmt "\n", ##__VA_ARGS__)
-#define LOG_W(fmt, ...) Serial.printf("[WARN] " fmt "\n", ##__VA_ARGS__)
-#define LOG_E(fmt, ...) Serial.printf("[ERROR] " fmt "\n", ##__VA_ARGS__)
+#include "utils/log.h"
 
 namespace adversary {
 namespace wardriving {
@@ -64,7 +61,7 @@ WardrivingManager::~WardrivingManager() {
 
 bool WardrivingManager::startSession() {
     if (active_) {
-        LOG_W("[Wardriving] Session already active");
+        LOG_W("WARDRV", "Session already active");
         return false;
     }
     
@@ -96,12 +93,12 @@ bool WardrivingManager::startSession() {
     // Ensure wardriving directory exists
     if (!SD.exists(WARDRIVING_DIR)) {
         if (!SD.mkdir(WARDRIVING_DIR)) {
-            LOG_E("[Wardriving] Failed to create wardriving directory");
+            LOG_E("WARDRV", "Failed to create wardriving directory");
             // Continue anyway - we'll try again when writing
         }
     }
     
-    LOG_I("[Wardriving] Stream-to-SD mode - networks written directly to: %s", csvPath_);
+    LOG_I("WARDRV", "Stream-to-SD mode - networks written directly to: %s", csvPath_);
     
     lastProcessedScanCount_ = 0;
     
@@ -118,7 +115,7 @@ bool WardrivingManager::startSession() {
     // Initialize WiFi scanner (init() is idempotent - safe to call multiple times)
     auto& scanner = WiFiScanner::getInstance();
     if (!scanner.init()) {
-        LOG_E("[Wardriving] Failed to initialize WiFi scanner");
+        LOG_E("WARDRV", "Failed to initialize WiFi scanner");
         active_ = false;
         return false;
     }
@@ -126,7 +123,7 @@ bool WardrivingManager::startSession() {
     active_ = true;
     paused_ = false;
     
-    LOG_I("[Wardriving] Session started: %s (memory-safe streaming mode)", session_.sessionId);
+    LOG_I("WARDRV", "Session started: %s (memory-safe streaming mode)", session_.sessionId);
     
     return true;
 }
@@ -152,7 +149,7 @@ void WardrivingManager::discardSession() {
     if (SD.begin()) {
         if (SD.exists(discardedPath)) {
             SD.remove(discardedPath);
-            LOG_I("[Wardriving] Session discarded. Deleted: %s", discardedPath);
+            LOG_I("WARDRV", "Session discarded. Deleted: %s", discardedPath);
         }
     }
     
@@ -179,17 +176,17 @@ void WardrivingManager::stopSession() {
     
     // Reinitialize SD card to recover from potential SPI bus conflict
     if (!SD.begin()) {
-        LOG_E("[Wardriving] SD card re-init failed, trying again...");
+        LOG_E("WARDRV", "SD card re-init failed, trying again...");
         delay(200);
         if (!SD.begin()) {
-            LOG_E("[Wardriving] SD card unavailable - data may be lost!");
+            LOG_E("WARDRV", "SD card unavailable - data may be lost!");
         }
     }
     
     // Flush any remaining pending networks to SD
     flushToSD();
     
-    LOG_I("[Wardriving] Session stopped: %s (%lu networks, %.2f km)",
+    LOG_I("WARDRV", "Session stopped: %s (%lu networks, %.2f km)",
           session_.sessionId, (unsigned long)session_.networksFound, session_.distanceTraveledKm);
     
     // Export JSON summary (CSV was written incrementally via streaming)
@@ -209,7 +206,7 @@ void WardrivingManager::stopSession() {
         jsonFile.printf("  \"csvFile\": \"%s\"\n", csvPath_);
         jsonFile.printf("}\n");
         jsonFile.close();
-        LOG_I("[Wardriving] Session summary saved: %s", jsonPath);
+        LOG_I("WARDRV", "Session summary saved: %s", jsonPath);
     }
     
     // Clear memory - this is the key to avoiding OOM
@@ -220,7 +217,7 @@ void WardrivingManager::stopSession() {
     // Cleanup WiFiScanner results to free heap
     scanner.clearResults();
     
-    LOG_I("[Wardriving] Memory released - heap: %lu bytes", (unsigned long)ESP.getFreeHeap());
+    LOG_I("WARDRV", "Memory released - heap: %lu bytes", (unsigned long)ESP.getFreeHeap());
 }
 
 void WardrivingManager::pauseSession() {
@@ -229,7 +226,7 @@ void WardrivingManager::pauseSession() {
     }
     
     paused_ = true;
-    LOG_I("[Wardriving] Session paused");
+    LOG_I("WARDRV", "Session paused");
 }
 
 void WardrivingManager::resumeSession() {
@@ -238,7 +235,7 @@ void WardrivingManager::resumeSession() {
     }
     
     paused_ = false;
-    LOG_I("[Wardriving] Session resumed");
+    LOG_I("WARDRV", "Session resumed");
 }
 
 // ============================================================================
@@ -280,7 +277,7 @@ void WardrivingManager::update() {
     // Debug: Periodic heap monitoring (every 60 seconds)
     static uint32_t lastHeapLog = 0;
     if (now - lastHeapLog > 60000) {
-        LOG_I("[Wardriving] Heap: %lu, seen: %lu, pending: %lu", 
+        LOG_I("WARDRV", "Heap: %lu, seen: %lu, pending: %lu", 
               (unsigned long)ESP.getFreeHeap(),
               (unsigned long)seenBSSIDs_.size(),
               (unsigned long)pendingNetworks_.size());
@@ -390,7 +387,7 @@ void WardrivingManager::processWiFiScan() {
     }
     
     if (newCount > 0) {
-        LOG_I("[Wardriving] Found %lu new networks (total: %lu)", 
+        LOG_I("WARDRV", "Found %lu new networks (total: %lu)", 
               (unsigned long)newCount, (unsigned long)seenBSSIDs_.size());
     }
 }
@@ -478,7 +475,7 @@ void WardrivingManager::flushToSD() {
         }
     }
     
-    LOG_I("[Wardriving] Flushed %lu networks to SD (total: %lu)", 
+    LOG_I("WARDRV", "Flushed %lu networks to SD (total: %lu)", 
           (unsigned long)flushedCount, (unsigned long)seenBSSIDs_.size());
     
     // Clear pending buffer - memory is now free
@@ -495,7 +492,7 @@ bool WardrivingManager::writeNetworkToCSV(const NetworkEntry& entry) {
         }
         file = SD.open(csvPath_, FILE_APPEND);
         if (!file) {
-            LOG_E("[Wardriving] Failed to open CSV: %s", csvPath_);
+            LOG_E("WARDRV", "Failed to open CSV: %s", csvPath_);
             return false;
         }
     }
