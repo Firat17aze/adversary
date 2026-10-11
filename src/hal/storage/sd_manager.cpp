@@ -15,6 +15,7 @@
 #include <SPI.h>
 #include <time.h>
 #include "config/pins.h"
+#include "utils/log.h"
 
 #if defined(TARGET_CARDPUTER)
 #include <M5Cardputer.h>
@@ -78,14 +79,14 @@ bool SDManager::init() {
 
 #if defined(TARGET_M5STICK)
     // M5StickC Plus 2 has no SD card slot - skip SD init entirely
-    Serial.println("[SDManager] M5Stick has no SD slot - using internal storage");
+    LOG_I("SDMGR", "M5Stick has no SD slot - using internal storage");
     m_status = SDStatus::NO_CARD;
     m_initialized = false;
     m_noCardVerdict = true;  // never any card here; keep remount() a no-op
     return false;  // Not an error, just no SD available
 #endif
 
-    Serial.println("[SDManager] Initializing SD card...");
+    LOG_I("SDMGR", "Initializing SD card...");
 
     // De-select any SPI peripheral sharing the bus before (re)mounting the SD.
     // A floating chip-select drives MISO and corrupts SD init. The same header
@@ -113,22 +114,22 @@ bool SDManager::init() {
     
     // Fallback to config pins if M5Unified didn't provide them
     if (sd_cs < 0 || sd_clk < 0 || sd_mosi < 0 || sd_miso < 0) {
-        Serial.println("[SDManager] Using config pin defaults");
+        LOG_W("SDMGR", "Using config pin defaults");
         sd_cs = pins::SD_CS;
         sd_clk = pins::SD_CLK;
         sd_mosi = pins::SD_MOSI;
         sd_miso = pins::SD_MISO;
     }
     
-    Serial.printf("[SDManager] Pins - CS:%d CLK:%d MOSI:%d MISO:%d\n", sd_cs, sd_clk, sd_mosi, sd_miso);
+    LOG_D("SDMGR", "Pins - CS:%d CLK:%d MOSI:%d MISO:%d", sd_cs, sd_clk, sd_mosi, sd_miso);
 
     // Method 1: Try if SD is already mounted by M5Launcher/bootloader
-    Serial.println("[SDManager] Checking if SD already mounted...");
+    LOG_D("SDMGR", "Checking if SD already mounted...");
     if (SD.cardType() != CARD_NONE) {
         File root = SD.open("/");
         if (root) {
             root.close();
-            Serial.println("[SDManager] SD card already mounted by launcher!");
+            LOG_I("SDMGR", "SD card already mounted by launcher!");
             m_status = SDStatus::READY;
             m_initialized = true;
             createDirectoryStructure();
@@ -139,7 +140,7 @@ bool SDManager::init() {
     // Method 2: Try Arduino SD with dedicated SPI bus (FSPI = SPI2 on ESP32-S3).
     // sdSPI is file-scoped so the multi-radio cap probe can share this exact
     // bus instance (slice-0002).
-    Serial.println("[SDManager] Attempting Arduino SD init with FSPI...");
+    LOG_D("SDMGR", "Attempting Arduino SD init with FSPI...");
 
     // Initialize SPI with SD card pins. The bus is now owned and shareable with
     // the cap probe regardless of whether a card mounts below, decoupling cap
@@ -154,28 +155,27 @@ bool SDManager::init() {
     bool success = false;
     
     for (int i = 0; i < 5 && !success; i++) {
-        Serial.printf("[SDManager] Trying %s... ", freq_names[i]);
-        
         // End any previous attempt
         SD.end();
         delay(100);
-        
+
         if (SD.begin(sd_cs, sdSPI, frequencies[i])) {
             if (SD.cardType() != CARD_NONE) {
                 // Verification: Try to open the root directory to confirm access
                 File root = SD.open("/");
                 if (root) {
-                    Serial.printf("SUCCESS (type=%d)\n", SD.cardType());
+                    LOG_I("SDMGR", "Mounted at %s (type=%d)", freq_names[i], SD.cardType());
                     root.close();
                     success = true;
                 } else {
-                    Serial.println("mount ok but root unreadable (speed too high?)");
+                    LOG_W("SDMGR", "%s: mount ok but root unreadable (speed too high?)",
+                          freq_names[i]);
                 }
             } else {
-                Serial.println("mounted but no card");
+                LOG_W("SDMGR", "%s: mounted but no card", freq_names[i]);
             }
         } else {
-            Serial.println("failed");
+            LOG_D("SDMGR", "%s: begin failed", freq_names[i]);
         }
     }
     
@@ -186,19 +186,19 @@ bool SDManager::init() {
     // dedicated-FSPI ladder above is the proven and only working mount path on this
     // board, so a failure here means no usable card.
     if (!success) {
-        Serial.println("[SDManager] No card mounted on the dedicated FSPI bus.");
-        Serial.println("[SDManager] Note: If M5Launcher sees the card, try direct USB flash");
+        LOG_W("SDMGR", "No card mounted on the dedicated FSPI bus. "
+                       "If M5Launcher sees the card, try direct USB flash");
         m_status = SDStatus::NO_CARD;
         m_noCardVerdict = true;  // don't re-run the ladder on shared-bus re-syncs
         return false;
     }
 
     // Print card info
-    Serial.printf("[SDManager] Card Type: %s\n", 
-        SD.cardType() == CARD_SD ? "SD" : 
-        SD.cardType() == CARD_SDHC ? "SDHC" : 
-        SD.cardType() == CARD_MMC ? "MMC" : "Unknown");
-    Serial.printf("[SDManager] Card Size: %llu MB\n", SD.cardSize() / (1024 * 1024));
+    LOG_I("SDMGR", "Card Type: %s",
+          SD.cardType() == CARD_SD ? "SD" :
+          SD.cardType() == CARD_SDHC ? "SDHC" :
+          SD.cardType() == CARD_MMC ? "MMC" : "Unknown");
+    LOG_I("SDMGR", "Card Size: %llu MB", SD.cardSize() / (1024 * 1024));
 
     m_status = SDStatus::READY;
     m_initialized = true;
@@ -227,7 +227,7 @@ bool SDManager::remount(bool forceRetry) {
     // full FSPI ladder once), don't pay that ladder again on every shared-bus
     // re-sync. Only an explicit operator retry (forceRetry) re-attempts.
     if (!sdShouldAttemptRemount(m_noCardVerdict, forceRetry)) {
-        Serial.println("[SDManager] remount skipped: no card (cached verdict)");
+        LOG_D("SDMGR", "remount skipped: no card (cached verdict)");
         return false;
     }
     if (forceRetry) {

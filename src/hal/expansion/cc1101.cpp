@@ -25,6 +25,7 @@
 #if defined(TARGET_CARDPUTER)
 #include <Arduino.h>
 #include <SPI.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -164,8 +165,8 @@ bool waitChipReady(SPIClass* bus) {
         version = readStatusReg(bus, REG_VERSION);
         if (version == CC1101_VERSION_EXPECTED) return true;
     } while (micros() - start < CHIP_READY_TIMEOUT_US);
-    Serial.printf("[CC1101] chip-ready timeout, VERSION=0x%02X (expected 0x%02X)\n",
-                  version, CC1101_VERSION_EXPECTED);
+    LOG_E("CC1101", "chip-ready timeout, VERSION=0x%02X (expected 0x%02X)",
+          version, CC1101_VERSION_EXPECTED);
     return false;
 }
 
@@ -185,7 +186,7 @@ bool enterState(uint8_t strobeCommand, uint8_t targetState) {
         uint8_t marc = readStatusReg(bus, REG_MARCSTATE) & MARC_STATE_MASK;
         if (marc == targetState) return true;
     } while (micros() - start < STATE_TIMEOUT_US);
-    Serial.printf("[CC1101] MARCSTATE never reached 0x%02X\n", targetState);
+    LOG_E("CC1101", "MARCSTATE never reached 0x%02X", targetState);
     return false;
 }
 
@@ -194,7 +195,7 @@ bool enterState(uint8_t strobeCommand, uint8_t targetState) {
 bool cc1101ConfigureOok(double carrierMHz) {
     SPIClass* bus = SDManager::getInstance().spiBus();
     if (!bus) {
-        Serial.println("[CC1101] SPI bus not owned (launcher mount); configure skipped");
+        LOG_W("CC1101", "SPI bus not owned (launcher mount); configure skipped");
         return false;
     }
 
@@ -248,14 +249,14 @@ bool cc1101ConfigureOok(double carrierMHz) {
 bool cc1101ConfigureFsk(double carrierMHz, uint8_t modFormat, double deviationHz,
                         double dataRateBaud, double rxBwHz) {
     if (!cc1101FskConfigValid(modFormat, dataRateBaud)) {
-        Serial.printf("[CC1101] MSK below %.0f baud floor (%.0f); FSK configure refused\n",
-                      CC1101_MSK_MIN_BAUD, dataRateBaud);
+        LOG_W("CC1101", "MSK below %.0f baud floor (%.0f); FSK configure refused",
+              CC1101_MSK_MIN_BAUD, dataRateBaud);
         return false;
     }
 
     SPIClass* bus = SDManager::getInstance().spiBus();
     if (!bus) {
-        Serial.println("[CC1101] SPI bus not owned (launcher mount); FSK configure skipped");
+        LOG_W("CC1101", "SPI bus not owned (launcher mount); FSK configure skipped");
         return false;
     }
 

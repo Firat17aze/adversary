@@ -13,6 +13,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <FS.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -34,17 +35,17 @@ public:
 #ifdef ESP32
         if (m_initialized) return true;
         
-        Serial.println("[LittleFS] Initializing internal flash storage...");
-        
+        LOG_I("LITTLEFS", "Initializing internal flash storage...");
+
         // Format if mount fails (first time)
         if (!LittleFS.begin(true)) {  // true = format if failed
-            Serial.println("[LittleFS] Mount failed even after format!");
+            LOG_E("LITTLEFS", "Mount failed even after format!");
             m_status = StorageStatus::ERROR;
             return false;
         }
-        
-        Serial.printf("[LittleFS] Mounted! Total: %u bytes, Used: %u bytes\n",
-                      LittleFS.totalBytes(), LittleFS.usedBytes());
+
+        LOG_I("LITTLEFS", "Mounted! Total: %u bytes, Used: %u bytes",
+              (unsigned int)LittleFS.totalBytes(), (unsigned int)LittleFS.usedBytes());
         
         m_initialized = true;
         m_status = StorageStatus::READY;
@@ -98,7 +99,7 @@ public:
         
         File file = LittleFS.open(path, "r");
         if (!file) {
-            Serial.printf("[LittleFS] Failed to open %s for reading\n", path);
+            LOG_E("LITTLEFS", "Failed to open %s for reading", path);
             return false;
         }
         
@@ -124,7 +125,7 @@ public:
         
         File file = LittleFS.open(path, "w");
         if (!file) {
-            Serial.printf("[LittleFS] Failed to open %s for writing\n", path);
+            LOG_E("LITTLEFS", "Failed to open %s for writing", path);
             return false;
         }
         
@@ -144,7 +145,7 @@ public:
         
         File file = LittleFS.open(path, "a");
         if (!file) {
-            Serial.printf("[LittleFS] Failed to open %s for appending\n", path);
+            LOG_E("LITTLEFS", "Failed to open %s for appending", path);
             return false;
         }
         
@@ -184,7 +185,7 @@ private:
         mkdir("/adversary/settings");
         mkdir("/adversary/captures");
         mkdir("/adversary/whitelist");
-        Serial.println("[LittleFS] Directory structure created");
+        LOG_D("LITTLEFS", "Directory structure created");
 #endif
     }
     

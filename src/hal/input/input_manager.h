@@ -12,6 +12,7 @@
 
 #ifdef ESP32
 #include <Arduino.h>
+#include "utils/log.h"
 #endif
 
 #if defined(TARGET_CARDPUTER)
@@ -379,8 +380,7 @@ private:
         
         // Debug output for button detection
         if (btnAWasPressed || btnBWasPressed) {
-            Serial.printf("[InputMgr] GPIO Btn: A(37)=%d B(39)=%d\n", 
-                btnAPressed, btnBPressed);
+            LOG_D("INPUT", "GPIO Btn: A(37)=%d B(39)=%d", btnAPressed, btnBPressed);
         }
         
         // Check for simultaneous press (A+B = MENU)

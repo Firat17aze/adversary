@@ -23,6 +23,7 @@
 #if defined(TARGET_CARDPUTER)
 #include <Arduino.h>
 #include <SPI.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -78,8 +79,8 @@ bool probeCC1101() {
     // A floating/absent bus reads all-zero or all-one; a seated part returns a
     // fixed silicon revision. The exact value is pinned in slice-0002 As built.
     bool present = (version != 0x00 && version != 0xFF);
-    Serial.printf("[Cap] CC1101 VERSION=0x%02X -> %s\n", version,
-                  present ? "present" : "absent");
+    LOG_I("CAP", "CC1101 VERSION=0x%02X -> %s", version,
+          present ? "present" : "absent");
     return present;
 #else
     return false;
@@ -128,8 +129,8 @@ bool probeNRF24() {
     releaseChipSelect(pins::NRF24_CS);
 
     bool present = (readback == NRF24_RF_CH_PROBE);
-    Serial.printf("[Cap] NRF24 RF_CH read-back=0x%02X -> %s\n", readback,
-                  present ? "present" : "absent");
+    LOG_I("CAP", "NRF24 RF_CH read-back=0x%02X -> %s", readback,
+          present ? "present" : "absent");
     return present;
 #else
     return false;
@@ -185,8 +186,8 @@ ExpansionCap detectExpansionCap(CapOverride ov) {
     if (ov == CapOverride::Auto) {
 #if defined(TARGET_CARDPUTER)
         if (!SDManager::getInstance().spiBus()) {
-            Serial.println("[Cap] SPI bus not owned (launcher mount); "
-                           "auto-probe skipped, override decides");
+            LOG_W("CAP", "SPI bus not owned (launcher mount); "
+                         "auto-probe skipped, override decides");
         }
 #endif
         cc1101 = probeCC1101();

@@ -23,6 +23,7 @@
 #if defined(TARGET_CARDPUTER)
 #include <Arduino.h>
 #include <SPI.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -81,7 +82,7 @@ uint8_t readReg(SPIClass* bus, uint8_t reg) {
 bool nrf24BeginRxScan() {
     SPIClass* bus = SDManager::getInstance().spiBus();
     if (!bus) {
-        Serial.println("[NRF24] SPI bus not owned (launcher mount); scan skipped");
+        LOG_W("NRF24", "SPI bus not owned (launcher mount); scan skipped");
         return false;
     }
 

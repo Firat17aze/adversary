@@ -1,10 +1,4 @@
 [
-  "src/hal/expansion/cc1101.cpp",
-  "src/hal/expansion/expansion_cap.cpp",
-  "src/hal/expansion/nrf24.cpp",
-  "src/hal/input/input_manager.h",
-  "src/hal/storage/littlefs_backend.h",
-  "src/hal/storage/sd_manager.cpp",
   "src/main.cpp",
   "src/ui/screen_manager.cpp",
   "src/ui/screen_registry.cpp",
