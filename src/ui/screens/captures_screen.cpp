@@ -10,6 +10,7 @@
 #include <SD.h>
 #include <Arduino.h>
 #include <esp_heap_caps.h>
+#include "utils/log.h"
 #include "../../modules/storage/capture_registry.h"
 #include "../../modules/storage/wpasec_cache.h"
 #include "../../modules/wifi/wifi_connection.h"
@@ -31,9 +32,12 @@ namespace adversary {
 // (16KB IN + 16KB OUT record buffers) can allocate; free heap alone hides
 // fragmentation. Tagged so a sync session is greppable on the serial log.
 static void logHeap(const char* where) {
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    Serial.printf("[Captures] heap @ %s: free=%u largest=%u\n",
-                  where, (unsigned)ESP.getFreeHeap(), (unsigned)largest);
+    // Inlined so the whole trace (the largest-block read included) vanishes when
+    // this DEBUG-level log compiles out at the INFO default.
+    LOG_D("CAPTURES", "heap @ %s: free=%u largest=%u", where,
+          (unsigned)ESP.getFreeHeap(),
+          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    (void)where;  // only consumed by the debug log above
 }
 
 // Draw sync progress straight to the panel (NOT the canvas). During a bulk
@@ -563,8 +567,8 @@ void CapturesScreen::loadFileList() {
     wpaSecStatusCache_.clear();
     
 #ifdef ESP32
-    uint32_t startTime = millis();
-    
+    [[maybe_unused]] uint32_t startTime = millis();  // only read by the LOG_D timings below
+
     // OPTIMIZATION: Use sorted indices into CaptureRegistry (saves ~9KB vs copying)
     // Only for HANDSHAKES - registry is normally populated at boot, but may have been
     // cleared by memory-intensive tasks (like BLE).
@@ -573,7 +577,7 @@ void CapturesScreen::loadFileList() {
         
         // Lazy-load registry data if it was cleared
         if (registry.getHandshakeCount() == 0) {
-            Serial.println("[Captures] Registry empty, rescanning summaries (lazy load)...");
+            LOG_I("CAPTURES", "Registry empty, rescanning summaries (lazy load)...");
             registry.rescanSummaries();
         }
         
@@ -598,9 +602,8 @@ void CapturesScreen::loadFileList() {
             wpaSecStatusCache_[i] = summaries[regIdx].wpaSecStatus;
         }
         
-        uint32_t elapsed = millis() - startTime;
-        Serial.printf("[Captures] Loaded %zu handshakes via indices (%lums)\n", 
-                      handshakeIndices_.size(), elapsed);
+        LOG_D("CAPTURES", "Loaded %zu handshakes via indices (%lums)",
+              handshakeIndices_.size(), (unsigned long)(millis() - startTime));
         return;
     }
     
@@ -652,8 +655,8 @@ void CapturesScreen::loadFileList() {
         return a.lastWrite > b.lastWrite;
     });
     
-    uint32_t elapsed = millis() - startTime;
-    Serial.printf("[Captures] Loaded %zu files from SD (%lums)\n", files_.size(), elapsed);
+    LOG_D("CAPTURES", "Loaded %zu files from SD (%lums)", files_.size(),
+          (unsigned long)(millis() - startTime));
 #endif
 }
 
@@ -671,7 +674,7 @@ void CapturesScreen::deleteSelectedFile() {
     snprintf(filepath, sizeof(filepath), "%s/%s", path, filename);
     
     if (SD.remove(filepath)) {
-        Serial.printf("[Captures] Deleted: %s\n", filepath);
+        LOG_I("CAPTURES", "Deleted: %s", filepath);
         
         // Also delete associated .json metadata file for handshakes
         if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
@@ -692,12 +695,12 @@ void CapturesScreen::deleteSelectedFile() {
             if (jsonExt) {
                 strcpy(jsonExt, ".json");
                 if (SD.remove(jsonPath)) {
-                    Serial.printf("[Captures] Deleted metadata: %s\n", jsonPath);
+                    LOG_D("CAPTURES", "Deleted metadata: %s", jsonPath);
                 }
             }
         }
     } else {
-        Serial.printf("[Captures] Failed to delete: %s\n", filepath);
+        LOG_E("CAPTURES", "Failed to delete: %s", filepath);
     }
 #endif
 }
@@ -1030,7 +1033,7 @@ void CapturesScreen::loadCredentials() {
     
     File file = SD.open(filepath, FILE_READ);
     if (!file) {
-        Serial.printf("[Captures] Failed to open: %s\n", filepath);
+        LOG_E("CAPTURES", "Failed to open: %s", filepath);
         return;
     }
     
@@ -1090,7 +1093,7 @@ void CapturesScreen::loadCredentials() {
         if (credentials_.size() >= 10) break;  // Limit to 10 entries for display
     }
     
-    Serial.printf("[Captures] Loaded %zu credentials from %s\n", credentials_.size(), files_[sel].name);
+    LOG_D("CAPTURES", "Loaded %zu credentials from %s", credentials_.size(), files_[sel].name);
 #endif
 }
 

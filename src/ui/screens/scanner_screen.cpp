@@ -8,6 +8,7 @@
 #include <cstring>
 #include "core/event_bus.h"
 #include "core/event_data.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -302,25 +303,25 @@ void ScannerScreen::handleAction(char action) {
     switch (action) {
         case 'D':  // Deauth Attack
         case 'd':
-            Serial.printf("[Scanner] Deauth selected for %s\n", m_selectedNetwork.ssid.c_str());
+            LOG_I("SCANNER", "Deauth selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::DEAUTH, m_selectedNetwork);
             break;
             
         case 'H':  // Handshake Capture
         case 'h':
-            Serial.printf("[Scanner] Handshake capture selected for %s\n", m_selectedNetwork.ssid.c_str());
+            LOG_I("SCANNER", "Handshake capture selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::HANDSHAKE, m_selectedNetwork);
             break;
             
         case 'T':  // Evil Twin
         case 't':
-            Serial.printf("[Scanner] Evil Twin selected for %s\n", m_selectedNetwork.ssid.c_str());
+            LOG_I("SCANNER", "Evil Twin selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::EVIL_TWIN, m_selectedNetwork);
             break;
             
         case 'P':  // Probe Flood
         case 'p':
-            Serial.printf("[Scanner] Probe Flood selected for %s\n", m_selectedNetwork.ssid.c_str());
+            LOG_I("SCANNER", "Probe Flood selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::PROBE_FLOOD, m_selectedNetwork);
             break;
             
@@ -333,7 +334,7 @@ void ScannerScreen::handleAction(char action) {
             } else {
                 // Check if network is open (no password needed)
                 if (m_selectedNetwork.security == WiFiSecurity::OPEN) {
-                    Serial.printf("[Scanner] Auto-connecting to open network: %s\n", m_selectedNetwork.ssid.c_str());
+                    LOG_I("SCANNER", "Auto-connecting to open network: %s", m_selectedNetwork.ssid.c_str());
                     WiFiConnection::getInstance().connect(
                         m_selectedNetwork.ssid.c_str(), 
                         "", 
@@ -346,7 +347,7 @@ void ScannerScreen::handleAction(char action) {
                 if (SettingsManager::getInstance().hasCredentialForSSID(m_selectedNetwork.ssid.c_str())) {
                     const char* savedPass = SettingsManager::getInstance().getPasswordForSSID(m_selectedNetwork.ssid.c_str());
                     if (savedPass && savedPass[0] != '\0') {
-                        Serial.printf("[Scanner] Auto-connecting with saved credentials: %s\n", m_selectedNetwork.ssid.c_str());
+                        LOG_I("SCANNER", "Auto-connecting with saved credentials: %s", m_selectedNetwork.ssid.c_str());
                         WiFiConnection::getInstance().connect(
                             m_selectedNetwork.ssid.c_str(), 
                             savedPass, 
@@ -362,7 +363,7 @@ void ScannerScreen::handleAction(char action) {
                 
                 // Configure callbacks before showing
                 m_passwordPopup.setOnSubmit([this](const char* password) {
-                    Serial.printf("[Scanner] Connecting to %s\n", m_selectedNetwork.ssid.c_str());
+                    LOG_I("SCANNER", "Connecting to %s", m_selectedNetwork.ssid.c_str());
                     WiFiConnection::getInstance().connect(
                         m_selectedNetwork.ssid.c_str(), 
                         password, 
@@ -381,12 +382,12 @@ void ScannerScreen::handleAction(char action) {
             
         case 'I':  // Info
         case 'i':
-            Serial.printf("[Scanner] Network Info: SSID=%s, BSSID=%02X:%02X:%02X:%02X:%02X:%02X, CH=%d, RSSI=%d\n",
-                          m_selectedNetwork.ssid.c_str(),
-                          m_selectedNetwork.bssid[0], m_selectedNetwork.bssid[1],
-                          m_selectedNetwork.bssid[2], m_selectedNetwork.bssid[3],
-                          m_selectedNetwork.bssid[4], m_selectedNetwork.bssid[5],
-                          m_selectedNetwork.channel, m_selectedNetwork.rssi);
+            LOG_I("SCANNER", "Network Info: SSID=%s, BSSID=%02X:%02X:%02X:%02X:%02X:%02X, CH=%d, RSSI=%d",
+                  m_selectedNetwork.ssid.c_str(),
+                  m_selectedNetwork.bssid[0], m_selectedNetwork.bssid[1],
+                  m_selectedNetwork.bssid[2], m_selectedNetwork.bssid[3],
+                  m_selectedNetwork.bssid[4], m_selectedNetwork.bssid[5],
+                  m_selectedNetwork.channel, m_selectedNetwork.rssi);
             // INFO is not an attack: the line above is the whole behaviour. No event.
             break;
     }

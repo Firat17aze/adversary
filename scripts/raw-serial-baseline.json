@@ -1,9 +1,5 @@
 [
   "src/main.cpp",
-  "src/ui/screens/captures_screen.cpp",
-  "src/ui/screens/handshake_screen.cpp",
-  "src/ui/screens/scanner_screen.cpp",
-  "src/ui/screens/sniffer_screen.cpp",
   "src/utils/handshake_save.h",
   "src/utils/raw_wifi.cpp",
   "src/utils/screenshot.cpp"

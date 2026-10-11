@@ -8,6 +8,7 @@
 #include <cstring>
 #include "core/event_bus.h"
 #include "core/event_data.h"
+#include "utils/log.h"
 
 namespace adversary {
 
@@ -404,7 +405,7 @@ void SnifferScreen::startCapture()
         }
         
         if (!m_pcapWriter.open(filename.c_str())) {
-            Serial.println("[SnifferScreen] Failed to open PCAP file");
+            LOG_W("SNIFFER", "Failed to open PCAP file");
             // Continue without saving
         }
     }
@@ -418,7 +419,7 @@ void SnifferScreen::startCapture()
     };
     
     if (!m_sniffer.start(callback)) {
-        Serial.println("[SnifferScreen] Failed to start sniffer");
+        LOG_E("SNIFFER", "Failed to start sniffer");
         m_pcapWriter.close();
         return;
     }
@@ -427,7 +428,7 @@ void SnifferScreen::startCapture()
     m_stats.currentChannel = m_sniffer.getChannel();
     m_needsRedraw = true;
     
-    Serial.println("[SnifferScreen] Capture started");
+    LOG_I("SNIFFER", "Capture started");
 }
 
 void SnifferScreen::stopCapture()
@@ -455,7 +456,7 @@ void SnifferScreen::stopCapture()
     m_capturing = false;
     m_needsRedraw = true;
     
-    Serial.println("[SnifferScreen] Capture stopped");
+    LOG_I("SNIFFER", "Capture stopped");
 }
 
 void SnifferScreen::toggleCapture()
@@ -725,7 +726,7 @@ void SnifferScreen::addPacketToLog(const CapturedPacket& packet)
         m_deauthCount++;
         if (m_deauthCount >= DEAUTH_FLOOD_THRESHOLD) {
             m_deauthFloodAlert = true;
-            Serial.println("[Sniffer] ALERT: Deauth flood detected!");
+            LOG_W("SNIFFER", "ALERT: Deauth flood detected!");
         }
     } else if (packet.isEAPOL()) {
         summary.frameType = PacketFrameType::EAPOL;
@@ -859,8 +860,8 @@ void SnifferScreen::executeAction(PacketAction action)
     const PacketSummary& pkt = m_packetLog[m_packetLogSelection];
 
     // Log action
-    Serial.printf("[Sniffer] Executing action %s on %s\n",
-                 getActionName(action), pkt.ssid[0] ? pkt.ssid : "<hidden>");
+    LOG_I("SNIFFER", "Executing action %s on %s",
+          getActionName(action), pkt.ssid[0] ? pkt.ssid : "<hidden>");
 
     // Map the chosen attack to its screen. The navigator (subscribed in main.cpp) tears down
     // this screen via hide() and launches the attack on the packet's source — the sniffer

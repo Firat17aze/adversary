@@ -23,6 +23,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <SD.h>
+#include "utils/log.h"
 #endif
 
 namespace adversary {
@@ -160,7 +161,7 @@ void HandshakeScreen::setTarget(const uint8_t* bssid, const char* ssid, uint8_t 
     needsRedraw_ = true;
     
 #ifdef ESP32
-    Serial.printf("[HandshakeScreen] Target set: %s CH:%d\n", targetSsid_, targetChannel_);
+    LOG_I("HS", "Target set: %s CH:%d", targetSsid_, targetChannel_);
 #endif
 }
 
@@ -284,7 +285,7 @@ bool HandshakeScreen::handleInput(char key) {
                         SettingsManager::getInstance().addToWhitelist(entry);
                         SettingsManager::getInstance().saveWhitelist();
 #ifdef ESP32
-                        Serial.printf("[AutoHunt] Whitelisted: %s\n", targetSsid_);
+                        LOG_D("AUTOHUNT", "Whitelisted: %s", targetSsid_);
 #endif
                         currentTargetIndex_ = -1;  // Force re-scan
                         setAutoHuntState(AutoHuntState::NEXT_TARGET);
@@ -404,7 +405,7 @@ void HandshakeScreen::startCapture() {
     // Auto Hunt mode - start scanning
     if (autoHuntMode_) {
 #ifdef ESP32
-        Serial.println("[HandshakeScreen] Starting Auto Hunt mode");
+        LOG_I("HS", "Starting Auto Hunt mode");
 #endif
         // Reset stats
         handshakesCaptured_ = 0;
@@ -442,7 +443,7 @@ void HandshakeScreen::startCapture() {
     // Manual mode - need target
     if (!hasTarget_) {
 #ifdef ESP32
-        Serial.println("[HandshakeScreen] No target set");
+        LOG_W("HS", "No target set");
 #endif
         return;
     }
@@ -462,7 +463,7 @@ void HandshakeScreen::startCapture() {
         screenState_ = HandshakeScreenState::CAPTURING;
         
 #ifdef ESP32
-        Serial.println("[HandshakeScreen] Capture started");
+        LOG_I("HS", "Capture started");
 #endif
     } else {
         screenState_ = HandshakeScreenState::ERROR;
@@ -485,7 +486,7 @@ void HandshakeScreen::stopCapture() {
     capturing_ = false;
     
 #ifdef ESP32
-    Serial.println("[HandshakeScreen] Capture stopped (WiFi OFF)");
+    LOG_I("HS", "Capture stopped (WiFi OFF)");
 #endif
 }
 
@@ -534,7 +535,7 @@ void HandshakeScreen::savePMKID22000(const CapturedPMKID& pmkid) {
     
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
-        Serial.println("[PMKID] Failed to open .22000 file");
+        LOG_E("PMKID", "Failed to open .22000 file");
         return;
     }
     
@@ -569,7 +570,7 @@ void HandshakeScreen::savePMKID22000(const CapturedPMKID& pmkid) {
     
     file.close();
     
-    Serial.printf("[PMKID] Saved .22000 to: %s\n", filename);
+    LOG_I("PMKID", "Saved .22000 to: %s", filename);
 #else
     (void)pmkid;
 #endif
@@ -579,7 +580,7 @@ void HandshakeScreen::onHandshakeCaptured(const SessionHandshakeEntry& hs) {
     (void)hs;
 
 #ifdef ESP32
-    Serial.printf("[HandshakeScreen] Handshake captured for %s\n", hs.ssid);
+    LOG_I("HS", "Handshake captured for %s", hs.ssid);
 #endif
     
     // Add to session buffer for handshake list view (autohunt mode)
@@ -596,8 +597,8 @@ void HandshakeScreen::onHandshakeCaptured(const SessionHandshakeEntry& hs) {
         if (!isDuplicate) {
             sessionHandshakeBuffer_.push_back(hs);
 #ifdef ESP32
-            Serial.printf("[HandshakeScreen] Added to session buffer (%zu total)\n",
-                          sessionHandshakeBuffer_.size());
+            LOG_D("HS", "Added to session buffer (%zu total)",
+                  sessionHandshakeBuffer_.size());
 #endif
         }
     }
@@ -649,7 +650,7 @@ void HandshakeScreen::onStateChanged(HandshakeState state) {
 void HandshakeScreen::setAutoHuntState(AutoHuntState newState) {
 #ifdef ESP32
     const char* stateNames[] = {"SCANNING", "LOCKING", "ATTACKING", "WAITING", "NEXT_TARGET", "IDLE_SCAN"};
-    Serial.printf("[AutoHunt] State: %s\n", stateNames[static_cast<int>(newState)]);
+    LOG_I("AUTOHUNT", "State: %s", stateNames[static_cast<int>(newState)]);
     
     // Start station scanning when entering LOCKING state
     // This runs during the progress bar, making the transition seamless
@@ -730,8 +731,8 @@ bool HandshakeScreen::selectNextTarget() {
     // Mark this network as attempted so we don't retry it this session
     markNetworkAttempted(targetBssid_);
     
-    Serial.printf("[AutoHunt] Selected target: %s (ch%d, RSSI:%ld)\n", 
-                  targetSsid_, targetChannel_, (long)WiFi.RSSI(bestIndex));
+    LOG_I("AUTOHUNT", "Selected target: %s (ch%d, RSSI:%ld)",
+          targetSsid_, targetChannel_, (long)WiFi.RSSI(bestIndex));
     
     return true;
 #else
@@ -846,8 +847,8 @@ void HandshakeScreen::markNetworkAttempted(const uint8_t* bssid) {
     attemptedHead_ = (attemptedHead_ + 1) % MAX_ATTEMPTED_NETWORKS;
     if (attemptedCount_ < MAX_ATTEMPTED_NETWORKS) attemptedCount_++;
 #ifdef ESP32
-    Serial.printf("[AutoHunt] Marked network as attempted (%d/%d tracked)\n",
-                  attemptedCount_, MAX_ATTEMPTED_NETWORKS);
+    LOG_D("AUTOHUNT", "Marked network as attempted (%d/%d tracked)",
+          attemptedCount_, MAX_ATTEMPTED_NETWORKS);
 #endif
 }
 
@@ -874,8 +875,8 @@ void HandshakeScreen::loadSessionHandshakes() {
     }
     
 #ifdef ESP32
-    Serial.printf("[HandshakeScreen] Loaded %zu handshakes from session buffer\n", 
-                  sessionHandshakes_.size());
+    LOG_D("HS", "Loaded %zu handshakes from session buffer",
+          sessionHandshakes_.size());
 #endif
 }
 
