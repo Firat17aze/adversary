@@ -569,6 +569,14 @@ constexpr const char* SD_BASE_PATH = "/adversary";
 7. **Update documentation** if needed
 8. **Create PR** with description of changes
 
+> **Logging a `LEDGER.md` item?** Run the ADR-0022 promote-or-keep check: the default is
+> *keep* (ledger is the single internal worklist), but if the item is legible to an outsider
+> without deep context, self-contained, and genuinely wants an outside contributor, **promote**
+> it — move it ledger→issue (`good first issue` when it also teaches the codebase) and delete
+> the ledger line in the same change. Bus factor is 1; this is our contributor funnel. Never
+> promote hardware-verify items, arch/design deferrals, security/supply-chain audits, or
+> deep-state bugs. Full criteria and rationale: `adr/0022-promote-select-ledger-items-to-github-issues.md`.
+
 ---
 
 ## 📝 Commit Message Format
