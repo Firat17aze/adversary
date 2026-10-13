@@ -4,7 +4,7 @@
  */
 
 #include <unity.h>
-#include "modules/rfid/rfid_manager.h"
+#include "hal/rfid/rfid_manager.h"
 #include <cstring>
 
 using namespace adversary;

@@ -31,7 +31,7 @@
 #include "ui/components/toast_manager.h"
 #include "modules/gps/gps_manager.h"
 #include "modules/gps/gps_probe.h"
-#include "modules/rfid/rfid_manager.h"
+#include "hal/rfid/rfid_manager.h"
 #include "modules/system/system_manager.h"
 #include "modules/system/time_manager.h"
 #include "modules/ble/ble_scanner.h"

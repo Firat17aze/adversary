@@ -9,8 +9,8 @@
  */
 
 #include <unity.h>
-#include "modules/rfid/rfid_writer.h"
-#include "modules/rfid/rfid_dump.h"
+#include "hal/rfid/rfid_writer.h"
+#include "hal/rfid/rfid_dump.h"
 #include <string>
 
 using namespace adversary;

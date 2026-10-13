@@ -14,7 +14,7 @@
 #include "../../hal/storage/sd_manager.h"
 #include "../../hal/expansion/expansion_cap.h"
 #include "../../modules/gps/gps_manager.h"
-#include "../../modules/rfid/rfid_manager.h"
+#include "../../hal/rfid/rfid_manager.h"
 #include "../../modules/storage/settings_manager.h"
 #include <WiFi.h>
 

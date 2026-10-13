@@ -6,7 +6,7 @@
 #include <unity.h>
 #include <functional>
 #include <string>
-#include "modules/rfid/rfid_audit.h"
+#include "hal/rfid/rfid_audit.h"
 
 #ifndef ESP32
 #include <SD.h>

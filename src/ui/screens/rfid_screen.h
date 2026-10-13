@@ -7,10 +7,10 @@
 
 #include "ui/screens/screen_interface.h"
 #include "ui/components/footer_hints.h"
-#include "modules/rfid/rfid_manager.h"
-#include "modules/rfid/rfid_audit.h"
-#include "modules/rfid/rfid_dump.h"
-#include "modules/rfid/rfid_writer.h"
+#include "hal/rfid/rfid_manager.h"
+#include "hal/rfid/rfid_audit.h"
+#include "hal/rfid/rfid_dump.h"
+#include "hal/rfid/rfid_writer.h"
 #include "ui/components/text_input_popup.h"
 #include <string>
 #include <vector>
