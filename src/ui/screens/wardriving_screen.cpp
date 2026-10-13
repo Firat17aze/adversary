@@ -4,6 +4,7 @@
  */
 
 #include "wardriving_screen.h"
+#include "utils/time_format.h"
 #include "modules/system/time_manager.h"
 #include "modules/wifi/wifi_scanner.h"
 #include "hal/expansion/expansion_cap.h"
@@ -308,13 +309,10 @@ bool WardrivingScreen::handleInput(char key) {
 // ============================================================================
 
 String WardrivingScreen::formatDuration(uint32_t seconds) {
-    uint32_t hours = seconds / 3600;
-    uint32_t minutes = (seconds % 3600) / 60;
-    uint32_t secs = seconds % 60;
-    
-    char buffer[12];
-    snprintf(buffer, sizeof(buffer), "%02lu:%02lu:%02lu", 
-             (unsigned long)hours, (unsigned long)minutes, (unsigned long)secs);
+    // Sized for the uint32_t worst case ("1193046:59:59"); formatting lives in the tested
+    // utils helper so hours past two digits never truncate (slice-0057).
+    char buffer[16];
+    adversary::utils::formatDuration(seconds, buffer, sizeof(buffer));
     return String(buffer);
 }
 
@@ -578,8 +576,9 @@ void WardrivingScreen::drawTime(Canvas& canvas, int16_t y) {
     if (!timeManager.isSynced()) return;
     
     time_t now = timeManager.now();
-    struct tm* timeinfo = gmtime(&now);
-    
+    struct tm timeinfo;
+    if (gmtime_r(&now, &timeinfo) == nullptr) return;  // unparseable epoch: nothing to draw
+
     // Show time source so user knows reliability:
     // NTP/GPS = accurate, SD = stale (off-time is lost without RTC)
     const char* srcTag;
@@ -588,11 +587,18 @@ void WardrivingScreen::drawTime(Canvas& canvas, int16_t y) {
         case TimeSource::GPS: srcTag = "GPS"; break;
         default:              srcTag = "~SD"; break;  // ~ = approximate
     }
-    
+
+    // Fields are reduced modulo their width (no-ops on valid gmtime output) to give the
+    // compiler the width proof, and the 3-char reliability tag is bounded with %.3s, so the
+    // fixed buffer cannot be overrun (slice-0057).
     char timeStr[36];
-    snprintf(timeStr, sizeof(timeStr), "%04d-%02d-%02d %02d:%02d:%02d [%s]",
-             timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
-             timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+    snprintf(timeStr, sizeof(timeStr), "%04u-%02u-%02u %02u:%02u:%02u [%.3s]",
+             static_cast<unsigned>(timeinfo.tm_year + 1900) % 10000u,
+             static_cast<unsigned>(timeinfo.tm_mon + 1) % 100u,
+             static_cast<unsigned>(timeinfo.tm_mday) % 100u,
+             static_cast<unsigned>(timeinfo.tm_hour) % 100u,
+             static_cast<unsigned>(timeinfo.tm_min) % 100u,
+             static_cast<unsigned>(timeinfo.tm_sec) % 100u,
              srcTag);
              
     canvas.setTextColor(theme::TEXT_SECONDARY());
