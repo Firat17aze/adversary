@@ -608,18 +608,9 @@ uint64_t WardrivingManager::hashBSSID(const uint8_t* bssid) const {
 }
 
 void WardrivingManager::generateSessionId(char* buffer) {
-    // Format: WD-YYYYMMDD-HHMMSS using real wall-clock time
-    time_t now = TimeManager::getInstance().now();
-    struct tm* timeinfo = localtime(&now);
-    
-    if (timeinfo && now > 1000000000) {  // Sanity: after ~2001 (time is synced)
-        snprintf(buffer, 20, "WD-%04d%02d%02d-%02d%02d%02d",
-                 timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
-                 timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-    } else {
-        // Fallback if no RTC/time sync
-        snprintf(buffer, 20, "WD-%08lX", (unsigned long)(millis() / 1000));
-    }
+    // Size comes from the real destination buffer, not a literal (see formatSessionId).
+    formatSessionId(TimeManager::getInstance().now(), millis(),
+                    buffer, sizeof(session_.sessionId));
 }
 
 // Below this epoch (2001-09-09) a computed timestamp cannot be real wall-clock:
@@ -640,6 +631,33 @@ void WardrivingManager::formatWigleTimestamp(uint32_t currentMillis, time_t curr
         // Clock was never synced to a real epoch: state "time unknown" with the
         // universally recognised epoch-zero sentinel rather than a fabricated date.
         snprintf(out, outLen, "1970-01-01 00:00:00");
+    }
+}
+
+// A 4-digit year is the widest the fixed "WD-YYYYMMDD-HHMMSS" id can hold; a clock reading
+// beyond it (corrupt or far-future) must fall back, not overflow the buffer with a
+// truncated datestamp.
+static constexpr int MAX_SESSION_ID_YEAR = 9999;
+
+void WardrivingManager::formatSessionId(time_t now, uint32_t uptimeMs,
+                                        char* out, size_t outLen) {
+    struct tm timeinfo;
+    int year = 0;
+    if (now >= MIN_SANE_EPOCH && gmtime_r(&now, &timeinfo) != nullptr &&
+        (year = timeinfo.tm_year + 1900) <= MAX_SESSION_ID_YEAR) {
+        // The modulo reductions are no-ops on this validated data (year is bounded above,
+        // and gmtime_r's own fields are already in range); they hand the compiler the
+        // field-width proof that satisfies -Wformat-truncation without a pragma.
+        snprintf(out, outLen, "WD-%04u%02u%02u-%02u%02u%02u",
+                 static_cast<unsigned>(year) % 10000u,
+                 static_cast<unsigned>(timeinfo.tm_mon + 1) % 100u,
+                 static_cast<unsigned>(timeinfo.tm_mday) % 100u,
+                 static_cast<unsigned>(timeinfo.tm_hour) % 100u,
+                 static_cast<unsigned>(timeinfo.tm_min) % 100u,
+                 static_cast<unsigned>(timeinfo.tm_sec) % 100u);
+    } else {
+        // No real time sync (or an out-of-range clock): uptime-hex id, never a truncated date.
+        snprintf(out, outLen, "WD-%08lX", static_cast<unsigned long>(uptimeMs / 1000));
     }
 }
 

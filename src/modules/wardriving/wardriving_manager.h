@@ -135,6 +135,23 @@ public:
     static void formatWigleTimestamp(uint32_t currentMillis, time_t currentEpoch,
                                      uint32_t eventMs, char* out, size_t outLen);
 
+    /**
+     * @brief Format a session id (pure, unit-testable).
+     *
+     * Emits "WD-YYYYMMDD-HHMMSS" (UTC) when `now` is a sane synced epoch whose year is
+     * in [2001, 9999]; otherwise the uptime-hex fallback "WD-XXXXXXXX" from `uptimeMs`.
+     * The year bound is a correctness guard, not cosmetics: an out-of-range clock would
+     * otherwise overflow a fixed id buffer with a truncated datestamp. Kept free of
+     * millis()/TimeManager reads so it is testable; the live values are supplied by
+     * generateSessionId.
+     *
+     * @param now      Wall-clock epoch (TimeManager::now())
+     * @param uptimeMs Device uptime (millis()), used only for the fallback id
+     * @param out      Output buffer; receives a NUL-terminated id (needs >= 20)
+     * @param outLen   Size of out
+     */
+    static void formatSessionId(time_t now, uint32_t uptimeMs, char* out, size_t outLen);
+
 private:
     WardrivingManager();
     ~WardrivingManager();

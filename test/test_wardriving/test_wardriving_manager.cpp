@@ -274,6 +274,28 @@ void test_wigle_timestamp_unsynced(void) {
     TEST_ASSERT_EQUAL_STRING("1970-01-01 00:00:00", out);
 }
 
+/**
+ * @brief A synced clock yields a real WD-YYYYMMDD-HHMMSS (UTC) session id (slice-0056).
+ */
+void test_session_id_synced(void) {
+    // 1700000000 == 2023-11-14 22:13:20 UTC
+    char out[20];
+    WardrivingManager::formatSessionId((time_t)1700000000, 0, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("WD-20231114-221320", out);
+}
+
+/**
+ * @brief An out-of-range year (> 9999) falls back to the uptime-hex id instead of
+ * overflowing the fixed buffer with a truncated datestamp (slice-0056 DoD scenario 2).
+ * Before the fix the 5-digit year was snprintf'd and silently truncated.
+ */
+void test_session_id_insane_year(void) {
+    // 260000000000 maps to a year well beyond 9999; uptimeMs/1000 == 0xABCD.
+    char out[20];
+    WardrivingManager::formatSessionId((time_t)260000000000LL, 43981000, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("WD-0000ABCD", out);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_bssid_deduplication);
@@ -283,5 +305,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_rssi_averaging);
     RUN_TEST(test_wigle_timestamp_synced);
     RUN_TEST(test_wigle_timestamp_unsynced);
+    RUN_TEST(test_session_id_synced);
+    RUN_TEST(test_session_id_insane_year);
     return UNITY_END();
 }
