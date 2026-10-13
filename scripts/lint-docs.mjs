@@ -34,7 +34,11 @@ const PROSE_DIRS = ['docs', '.claude/commands'];
  * The hook materialises the staged tree and copies only what the checks read, so a rule
  * reading outside this set runs against a file that was never extracted. That happened:
  * rules 14 and 15 shipped reading four paths the hook did not copy, and were dead there
- * for a release while passing in CI. `test/read-set.test.mjs` holds the two lists equal.
+ * for a release while passing in CI. This READ_SCOPE and the hook's archive list must be
+ * kept equal; the test asserting that equality lives in the Stele method's own repo, where
+ * the hook and this linter are tracked together. It cannot live here — the hook sits under
+ * `.claude/`, which ADR-0012 keeps out of this public tree, so a local test could not read
+ * it to compare (ex-slice-0038). Keep the two lists in sync by hand until then.
  */
 export const READ_SCOPE = [
   ...DOC_DIRS, 'LEDGER.md', ...PROSE_FILES, ...PROSE_DIRS, 'scripts', 'package.json',
