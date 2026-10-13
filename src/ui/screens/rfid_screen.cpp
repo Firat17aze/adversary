@@ -1376,7 +1376,10 @@ void RfidScreen::drawWritePick(Canvas& canvas) {
                             screenW - 4, bottomY - 6, theme::ACCENT());
     }
 
-    char rightContent[8];
+    // char[8] truncated the "N/M" counter once the file count reached 4 digits
+    // (e.g. "1000/1000" -> "1000/10"). Sized for the worst case of two 32-bit %d plus
+    // '/' and NUL (24); interim until the shared count formatter lands (see issue #54).
+    char rightContent[24];
     snprintf(rightContent, sizeof(rightContent), "%d/%d", m_writeFileSelection + 1, total);
     footerHints_.setRightContent(rightContent);
 }
