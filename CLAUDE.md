@@ -369,6 +369,14 @@ pio run -t clean
 pio device monitor -b 115200
 ```
 
+> **Build the environments serially, never concurrently.** Running `cardputer`, `m5stick`,
+> and/or `native` builds in parallel races PlatformIO's shared package installer under
+> `~/.platformio`: a framework/toolchain (re)install triggered by one process is seen
+> half-done by the others, and the `weaken_deauth` pre-hook (`extra_scripts`, see
+> `scripts/weaken_deauth_pre.py`) then fails to resolve objcopy. Recovery is `pio run -t
+> clean` per env; prevention is to run them one at a time. (The native env uses the host
+> gcc toolchain, so it survives — it's the two xtensa device builds that collide.)
+
 ### Environment Configuration
 ```ini
 ; platformio.ini
