@@ -13,6 +13,7 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_set>
+#include <ctime>    // time_t for formatWigleTimestamp
 
 #ifdef ARDUINO
 #include <SD.h>
@@ -110,7 +111,30 @@ public:
      * @brief Legacy getter - returns pending buffer (use getNetworkCount for total)
      */
     std::vector<NetworkEntry> getNetworks() const;
-    
+
+    /**
+     * @brief Format a network's WiGLE "FirstSeen" timestamp (pure, unit-testable).
+     *
+     * A network is stamped with the real wall-clock time it was first seen. Because
+     * only device-uptime (`millis()`) is recorded per network, the real epoch is
+     * reconstructed from the device's current millis and current wall-clock epoch:
+     * `eventEpoch = currentEpoch - (currentMillis - eventMs)/1000`. If the clock was
+     * never synced to a real epoch (`now()` returns 0, below MIN_SANE_EPOCH), the
+     * epoch-zero sentinel "1970-01-01 00:00:00" is written rather than a fabricated
+     * date — "time unknown" is stated, not masked.
+     *
+     * Kept free of millis()/TimeManager reads so it is testable off-hardware; the
+     * live values are supplied by the single call site in writeNetworkToCSV.
+     *
+     * @param currentMillis Device uptime now (millis())
+     * @param currentEpoch  Device wall-clock epoch now (TimeManager::now())
+     * @param eventMs        The network's firstSeenMs (device uptime at first sighting)
+     * @param out            Output buffer; receives "YYYY-MM-DD HH:MM:SS" (UTC)
+     * @param outLen         Size of out (>= 20)
+     */
+    static void formatWigleTimestamp(uint32_t currentMillis, time_t currentEpoch,
+                                     uint32_t eventMs, char* out, size_t outLen);
+
 private:
     WardrivingManager();
     ~WardrivingManager();

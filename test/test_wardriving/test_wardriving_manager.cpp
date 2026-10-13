@@ -250,6 +250,30 @@ void test_rssi_averaging(void) {
     TEST_ASSERT_EQUAL(-50, nets[0].rssi);
 }
 
+/**
+ * @brief WiGLE FirstSeen is real wall-clock, not a fabricated calendar date (slice-0055).
+ *
+ * A network first seen 6 s of uptime ago, with the clock synced so that moment maps to
+ * epoch 1700000000, must stamp as that exact UTC time. Before the fix the inline writer
+ * could only ever emit "2024-01-01 HH:MM:SS", so this assertion fails pre-fix.
+ */
+void test_wigle_timestamp_synced(void) {
+    // currentMillis=10000, eventMs=4000 -> elapsed 6 s; currentEpoch 1700000006 -> event 1700000000
+    char out[32];
+    WardrivingManager::formatWigleTimestamp(10000, (time_t)1700000006, 4000, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("2023-11-14 22:13:20", out);
+}
+
+/**
+ * @brief When the clock was never synced (now() == 0), emit the epoch-zero sentinel,
+ * not a plausible-looking fake date (slice-0055 DoD scenario 3).
+ */
+void test_wigle_timestamp_unsynced(void) {
+    char out[32];
+    WardrivingManager::formatWigleTimestamp(10000, (time_t)0, 4000, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("1970-01-01 00:00:00", out);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_bssid_deduplication);
@@ -257,5 +281,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_gps_tagging);
     RUN_TEST(test_buffer_flush_logic);
     RUN_TEST(test_rssi_averaging);
+    RUN_TEST(test_wigle_timestamp_synced);
+    RUN_TEST(test_wigle_timestamp_unsynced);
     return UNITY_END();
 }

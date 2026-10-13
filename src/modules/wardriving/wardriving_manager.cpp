@@ -4,7 +4,6 @@
  */
 
 #include "wardriving_manager.h"
-#include "wardriving_exporter.h"
 #include "../wifi/wifi_scanner.h"
 #include "../gps/gps_manager.h"
 #include "../storage/settings_manager.h"
@@ -524,13 +523,11 @@ bool WardrivingManager::writeNetworkToCSV(const NetworkEntry& entry) {
         case 7: authMode = "[WPA2-PSK+WPA3][ESS]"; break; // WPA2_WPA3_PSK
     }
     
-    // Format timestamp (approximate - millis to date string)
+    // Real wall-clock FirstSeen reconstructed from device uptime (see header).
     char timeStr[32];
-    snprintf(timeStr, sizeof(timeStr), "2024-01-01 %02u:%02u:%02u",
-             (unsigned int)((entry.firstSeenMs / 3600000) % 24),
-             (unsigned int)((entry.firstSeenMs / 60000) % 60),
-             (unsigned int)((entry.firstSeenMs / 1000) % 60));
-    
+    formatWigleTimestamp(millis(), TimeManager::getInstance().now(),
+                         entry.firstSeenMs, timeStr, sizeof(timeStr));
+
     // Write CSV row
     file.printf("%s,\"%s\",%s,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,WIFI\n",
                 bssidStr,
@@ -622,6 +619,27 @@ void WardrivingManager::generateSessionId(char* buffer) {
     } else {
         // Fallback if no RTC/time sync
         snprintf(buffer, 20, "WD-%08lX", (unsigned long)(millis() / 1000));
+    }
+}
+
+// Below this epoch (2001-09-09) a computed timestamp cannot be real wall-clock:
+// TimeManager::now() returns 0 when it has never synced, so any eventEpoch at or
+// below this is the unsynced case, not a genuine early-2000s observation.
+static constexpr time_t MIN_SANE_EPOCH = 1000000000;
+
+void WardrivingManager::formatWigleTimestamp(uint32_t currentMillis, time_t currentEpoch,
+                                             uint32_t eventMs, char* out, size_t outLen) {
+    // How long ago (device uptime) the network was first seen, mapped onto real time.
+    uint32_t elapsedMs = currentMillis - eventMs;
+    time_t eventEpoch = currentEpoch - static_cast<time_t>(elapsedMs / 1000);
+
+    struct tm timeinfo;
+    if (eventEpoch >= MIN_SANE_EPOCH && gmtime_r(&eventEpoch, &timeinfo) != nullptr) {
+        strftime(out, outLen, "%Y-%m-%d %H:%M:%S", &timeinfo);
+    } else {
+        // Clock was never synced to a real epoch: state "time unknown" with the
+        // universally recognised epoch-zero sentinel rather than a fabricated date.
+        snprintf(out, outLen, "1970-01-01 00:00:00");
     }
 }
 
