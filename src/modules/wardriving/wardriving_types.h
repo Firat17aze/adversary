@@ -18,14 +18,28 @@ namespace adversary {
 namespace wardriving {
 
 /**
+ * @brief Observation source / WiGLE "Type" column discriminator.
+ *
+ * A wardriving row is either an 802.11 AP or a Bluetooth-LE advertiser; both flow
+ * through the same dedup/GPS/CSV pipeline (ADR-0060), differing only in the scan
+ * source and three row fields (AuthMode, Channel, Type). Classic BT (WiGLE `BT`) is
+ * not represented — NimBLE scans BLE only (slice-0061).
+ */
+enum class ObservationType : uint8_t {
+    WIFI = 0,   ///< 802.11 access point   -> WiGLE Type column "WIFI"
+    BLE  = 1,   ///< Bluetooth-LE advertiser -> WiGLE Type column "BLE"
+};
+
+/**
  * @brief Single network entry with GPS data
  */
 struct NetworkEntry {
-    char ssid[33];              ///< Network SSID (null-terminated)
-    uint8_t bssid[6];           ///< MAC address (deduplication key)
+    char ssid[33];              ///< Network SSID / BLE device name (null-terminated)
+    uint8_t bssid[6];           ///< MAC address / BLE BD_ADDR (deduplication key)
     int8_t rssi;                ///< Best signal strength seen (dBm)
-    uint8_t channel;            ///< WiFi channel (1-14)
-    uint8_t encryptionType;     ///< Security type (from WiFi.h constants)
+    uint8_t channel;            ///< WiFi channel (1-14); 0 for BLE (WiGLE convention)
+    uint8_t encryptionType;     ///< Security type (from WiFi.h constants); unused for BLE
+    ObservationType type;       ///< Observation source (selects the WiGLE row shape)
     
     // GPS data (from first sighting with valid fix)
     double latitude;            ///< Decimal degrees (-90 to +90)
@@ -38,10 +52,11 @@ struct NetworkEntry {
     uint16_t seenCount;         ///< Number of times seen in scans
     bool hasGPS;                ///< GPS data is valid
     
-    NetworkEntry() 
+    NetworkEntry()
         : rssi(-100)
         , channel(0)
         , encryptionType(0)
+        , type(ObservationType::WIFI)
         , latitude(0.0)
         , longitude(0.0)
         , altitude(0.0f)

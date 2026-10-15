@@ -504,45 +504,67 @@ bool WardrivingManager::writeNetworkToCSV(const NetworkEntry& entry) {
         csvHeaderWritten_ = true;
     }
     
-    // Format BSSID
-    char bssidStr[18];
-    snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
-             entry.bssid[0], entry.bssid[1], entry.bssid[2],
-             entry.bssid[3], entry.bssid[4], entry.bssid[5]);
-    
-    // Map encryption type to WiGLE format
-    const char* authMode = "[WPA2-PSK-CCMP][ESS]";  // Default
-    switch (entry.encryptionType) {
-        case 0: authMode = "[ESS]"; break;              // OPEN
-        case 1: authMode = "[WEP][ESS]"; break;         // WEP
-        case 2: authMode = "[WPA-PSK][ESS]"; break;     // WPA_PSK
-        case 3: authMode = "[WPA2-PSK-CCMP][ESS]"; break; // WPA2_PSK
-        case 4: authMode = "[WPA-PSK+WPA2-PSK][ESS]"; break; // WPA_WPA2_PSK
-        case 5: authMode = "[WPA2-EAP][ESS]"; break;    // WPA2_ENTERPRISE
-        case 6: authMode = "[WPA3][ESS]"; break;        // WPA3_PSK
-        case 7: authMode = "[WPA2-PSK+WPA3][ESS]"; break; // WPA2_WPA3_PSK
-    }
-    
-    // Real wall-clock FirstSeen reconstructed from device uptime (see header).
-    char timeStr[32];
-    formatWigleTimestamp(millis(), TimeManager::getInstance().now(),
-                         entry.firstSeenMs, timeStr, sizeof(timeStr));
+    // Real wall-clock FirstSeen is reconstructed inside formatWigleRow from these live
+    // clock values; the formatter itself stays pure so the row is unit-testable.
+    char row[160];
+    formatWigleRow(entry, millis(), TimeManager::getInstance().now(), row, sizeof(row));
+    file.print(row);
 
-    // Write CSV row
-    file.printf("%s,\"%s\",%s,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,WIFI\n",
-                bssidStr,
-                entry.ssid,
-                authMode,
-                timeStr,
-                entry.channel,
-                entry.rssi,
-                entry.hasGPS ? entry.latitude : 0.0,
-                entry.hasGPS ? entry.longitude : 0.0,
-                entry.hasGPS ? entry.altitude : 0.0f,
-                entry.hasGPS ? 10.0f : 0.0f);  // Accuracy estimate
-    
     file.close();
     return true;
+}
+
+void WardrivingManager::formatWigleRow(const NetworkEntry& entry, uint32_t currentMillis,
+                                       time_t currentEpoch, char* out, size_t outLen) {
+    // Address: same AA:BB:CC:DD:EE:FF formatting for WiFi BSSID and BLE BD_ADDR.
+    char addrStr[18];
+    snprintf(addrStr, sizeof(addrStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             entry.bssid[0], entry.bssid[1], entry.bssid[2],
+             entry.bssid[3], entry.bssid[4], entry.bssid[5]);
+
+    // Real wall-clock FirstSeen reconstructed from device uptime (see formatWigleTimestamp).
+    char timeStr[32];
+    formatWigleTimestamp(currentMillis, currentEpoch, entry.firstSeenMs, timeStr, sizeof(timeStr));
+
+    // The three fields that differ by observation type (ADR-0060 / slice-0061 D6).
+    const char* authMode;
+    const char* typeStr;
+    uint8_t channel;
+    if (entry.type == ObservationType::BLE) {
+        // WiGLE 1.4: Bluetooth rows use channel 0 and a capability list; the spec's
+        // reference BLE example is "Misc [LE]" (api.wigle.net/csvFormat-1_4.html).
+        authMode = "Misc [LE]";
+        channel = 0;
+        typeStr = "BLE";
+    } else {
+        // Map encryption type to WiGLE AuthMode capability string.
+        authMode = "[WPA2-PSK-CCMP][ESS]";  // Default
+        switch (entry.encryptionType) {
+            case 0: authMode = "[ESS]"; break;                   // OPEN
+            case 1: authMode = "[WEP][ESS]"; break;              // WEP
+            case 2: authMode = "[WPA-PSK][ESS]"; break;          // WPA_PSK
+            case 3: authMode = "[WPA2-PSK-CCMP][ESS]"; break;    // WPA2_PSK
+            case 4: authMode = "[WPA-PSK+WPA2-PSK][ESS]"; break; // WPA_WPA2_PSK
+            case 5: authMode = "[WPA2-EAP][ESS]"; break;         // WPA2_ENTERPRISE
+            case 6: authMode = "[WPA3][ESS]"; break;             // WPA3_PSK
+            case 7: authMode = "[WPA2-PSK+WPA3][ESS]"; break;    // WPA2_WPA3_PSK
+        }
+        channel = entry.channel;
+        typeStr = "WIFI";
+    }
+
+    snprintf(out, outLen, "%s,\"%s\",%s,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,%s\n",
+             addrStr,
+             entry.ssid,
+             authMode,
+             timeStr,
+             channel,
+             entry.rssi,
+             entry.hasGPS ? entry.latitude : 0.0,
+             entry.hasGPS ? entry.longitude : 0.0,
+             entry.hasGPS ? entry.altitude : 0.0f,
+             entry.hasGPS ? 10.0f : 0.0f,   // Accuracy estimate
+             typeStr);
 }
 
 void WardrivingManager::updateNetworkGPS(NetworkEntry* entry) {

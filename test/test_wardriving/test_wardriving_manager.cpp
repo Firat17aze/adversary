@@ -296,6 +296,63 @@ void test_session_id_insane_year(void) {
     TEST_ASSERT_EQUAL_STRING("WD-0000ABCD", out);
 }
 
+/**
+ * @brief The extracted pure row formatter emits today's WIFI row byte-for-byte
+ * (slice-0061 D2 regression guard). Locks the AuthMode mapping, field order, channel,
+ * GPS fields and trailing `,WIFI` so the extraction from writeNetworkToCSV stays
+ * behaviour-neutral for the existing path. A dropped/reordered field fails this.
+ */
+void test_wigle_row_wifi_unchanged(void) {
+    NetworkEntry entry;
+    uint8_t bssid[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    memcpy(entry.bssid, bssid, 6);
+    strncpy(entry.ssid, "TestNet1", sizeof(entry.ssid) - 1);
+    entry.encryptionType = 3;            // WPA2_PSK -> "[WPA2-PSK-CCMP][ESS]"
+    entry.channel = 6;
+    entry.rssi = -50;
+    entry.firstSeenMs = 4000;
+    entry.hasGPS = true;
+    entry.latitude = 37.7749;
+    entry.longitude = -122.4194;
+    entry.altitude = 12.0f;
+    // type defaults to WIFI
+
+    char row[160];
+    // currentMillis=10000, eventMs=4000 -> 6 s ago; epoch 1700000006 -> 1700000000.
+    WardrivingManager::formatWigleRow(entry, 10000, (time_t)1700000006, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING(
+        "00:11:22:33:44:55,\"TestNet1\",[WPA2-PSK-CCMP][ESS],2023-11-14 22:13:20,6,-50,"
+        "37.774900,-122.419400,12.0,10.0,WIFI\n",
+        row);
+}
+
+/**
+ * @brief A BLE observation formats to WiGLE's BT/BLE row spec (slice-0061 D6): AuthMode
+ * "Misc [LE]", Channel forced to 0 (here proven by a non-zero channel field being
+ * overridden), trailing `,BLE`. Fails before the ObservationType::BLE branch exists.
+ */
+void test_wigle_row_ble(void) {
+    NetworkEntry entry;
+    uint8_t addr[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    memcpy(entry.bssid, addr, 6);
+    strncpy(entry.ssid, "MyWatch", sizeof(entry.ssid) - 1);
+    entry.type = ObservationType::BLE;
+    entry.channel = 11;                  // must be overridden to 0 in the BLE row
+    entry.rssi = -70;
+    entry.firstSeenMs = 4000;
+    entry.hasGPS = true;
+    entry.latitude = 37.7749;
+    entry.longitude = -122.4194;
+    entry.altitude = 0.0f;
+
+    char row[160];
+    WardrivingManager::formatWigleRow(entry, 10000, (time_t)1700000006, row, sizeof(row));
+    TEST_ASSERT_EQUAL_STRING(
+        "AA:BB:CC:DD:EE:FF,\"MyWatch\",Misc [LE],2023-11-14 22:13:20,0,-70,"
+        "37.774900,-122.419400,0.0,10.0,BLE\n",
+        row);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_bssid_deduplication);
@@ -307,5 +364,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_wigle_timestamp_unsynced);
     RUN_TEST(test_session_id_synced);
     RUN_TEST(test_session_id_insane_year);
+    RUN_TEST(test_wigle_row_wifi_unchanged);
+    RUN_TEST(test_wigle_row_ble);
     return UNITY_END();
 }

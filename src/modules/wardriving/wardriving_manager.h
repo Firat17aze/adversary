@@ -152,6 +152,30 @@ public:
      */
     static void formatSessionId(time_t now, uint32_t uptimeMs, char* out, size_t outLen);
 
+    /**
+     * @brief Format one WiGLE CSV data row for a network entry (pure, unit-testable).
+     *
+     * Emits a single `WigleWifi-1.4` row terminated with '\n'. The row shape is
+     * selected by `entry.type` (ADR-0060 / slice-0061):
+     *   - WIFI: AuthMode from the encryption-type mapping, real WiFi channel, Type "WIFI".
+     *   - BLE : AuthMode "Misc [LE]", Channel 0, Type "BLE" — WiGLE's documented BT/BLE
+     *           field spec (api.wigle.net/csvFormat-1_4.html: "0 for Bluetooth devices",
+     *           capability example "Misc [LE]"). The BLE discriminator is the Type column.
+     *
+     * Kept free of SD/display and of millis()/TimeManager reads so it is testable
+     * off-hardware (the WIFI path must stay byte-identical to the pre-extraction writer).
+     * The FirstSeen timestamp is reconstructed via formatWigleTimestamp from the live
+     * clock values supplied by the single call site in writeNetworkToCSV.
+     *
+     * @param entry         The network to format
+     * @param currentMillis Device uptime now (millis())
+     * @param currentEpoch  Device wall-clock epoch now (TimeManager::now())
+     * @param out           Output buffer; receives the NUL-terminated row (needs >= 160)
+     * @param outLen        Size of out
+     */
+    static void formatWigleRow(const NetworkEntry& entry, uint32_t currentMillis,
+                               time_t currentEpoch, char* out, size_t outLen);
+
 private:
     WardrivingManager();
     ~WardrivingManager();
