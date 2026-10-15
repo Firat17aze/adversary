@@ -52,6 +52,7 @@ void SettingsScreen::buildSettingsList() {
     tempDeauthInterval_ = settings.wireless.deauthIntervalMs;
     tempBeaconInterval_ = settings.wireless.beaconIntervalMs;
     tempWardrivingScanInterval_ = settings.wireless.wardrivingScanIntervalMs;
+    tempWardrivingRadioMode_ = settings.wireless.wardrivingRadioMode;
     tempBrightness_ = settings.display.brightness;
     tempToastPosition_ = settings.display.toastPosition;
     tempThemePreset_ = settings.display.themePreset;
@@ -100,7 +101,8 @@ void SettingsScreen::buildSettingsList() {
     // Wardriving section
     items_[itemCount_++] = SettingItem::header("-- Wardriving --");
     items_[itemCount_++] = SettingItem("Scan Interval", &tempWardrivingScanInterval_, 1000, 10000, 500, "ms");
-    
+    items_[itemCount_++] = SettingItem("Radio Mode", &tempWardrivingRadioMode_, 0, 2, 1, "");
+
     // Display section
     items_[itemCount_++] = SettingItem::header("-- Display --");
     items_[itemCount_++] = SettingItem("Brightness", &tempBrightness_, 10, 100, 10, "%");
@@ -223,6 +225,7 @@ void SettingsScreen::hide() {
         settings.wireless.deauthIntervalMs = tempDeauthInterval_;
         settings.wireless.beaconIntervalMs = tempBeaconInterval_;
         settings.wireless.wardrivingScanIntervalMs = tempWardrivingScanInterval_;
+        settings.wireless.wardrivingRadioMode = tempWardrivingRadioMode_;
         settings.display.brightness = tempBrightness_;
         settings.display.toastPosition = tempToastPosition_;
         settings.display.themePreset = tempThemePreset_;
@@ -776,6 +779,14 @@ void SettingsScreen::drawItems(Canvas& canvas) {
                     int idx = *item.valuePtr;
                     if (idx >= 0 && idx <= 2) {
                         strncpy(valStr, speedLabels[idx], sizeof(valStr) - 1);
+                    } else {
+                        snprintf(valStr, sizeof(valStr), "%d", idx);
+                    }
+                } else if (item.valuePtr == &tempWardrivingRadioMode_) {
+                    const char* modeLabels[] = {"WiFi", "BLE", "Both"};
+                    int idx = *item.valuePtr;
+                    if (idx >= 0 && idx <= 2) {
+                        strncpy(valStr, modeLabels[idx], sizeof(valStr) - 1);
                     } else {
                         snprintf(valStr, sizeof(valStr), "%d", idx);
                     }

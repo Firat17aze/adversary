@@ -176,6 +176,7 @@ private:
     int32_t tempDeauthInterval_;
     int32_t tempBeaconInterval_;
     int32_t tempWardrivingScanInterval_;
+    int32_t tempWardrivingRadioMode_;   // 0=WiFi, 1=BLE, 2=Both (ADR-0060)
     int32_t tempBrightness_;
     int32_t tempSerialDebug_;
     int32_t tempNotifySounds_;
