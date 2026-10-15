@@ -277,7 +277,8 @@ void DeauthScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     int maxVisibleItems = (footerY - y) / lineHeight;
     if (maxVisibleItems < 1) maxVisibleItems = 1;
-    
+    configVisibleItems_ = maxVisibleItems;  // single source of truth, read by handleInput
+
     // Draw visible config options with scroll offset
     for (int i = scrollOffset_; i < CONFIG_OPTION_COUNT && (i - scrollOffset_) < maxVisibleItems; i++) {
         bool selected = (i == configSelection_);
@@ -544,9 +545,9 @@ void DeauthScreen::handleDown()
     if (screenState_ == DeauthScreenState::CONFIG) {
         if (configSelection_ < CONFIG_OPTION_COUNT - 1) {
             configSelection_++;
-            // Adjust scroll if selection moves below visible area (assume ~3 visible items)
-            if (configSelection_ >= scrollOffset_ + VISIBLE_CONFIG_ITEMS) {
-                scrollOffset_ = configSelection_ - VISIBLE_CONFIG_ITEMS + 1;
+            // Adjust scroll if selection moves below the rendered area
+            if (configSelection_ >= scrollOffset_ + configVisibleItems_) {
+                scrollOffset_ = configSelection_ - configVisibleItems_ + 1;
             }
             needsRedraw_ = true;
         }

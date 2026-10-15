@@ -199,6 +199,10 @@ private:
     // on SD. This is what kept the History view from nearly OOMing mid-capture.
     int handshakeListScroll_ = 0;
     int handshakeListSelection_ = 0;
+    // Rows the handshake list can show, set by drawHandshakeList from the live layout and
+    // read by the scroll logic so the two can't drift (the input path previously assumed a
+    // fixed 4 while the renderer drew height/itemHeight). Seeded for input before first paint.
+    int handshakeListVisibleItems_ = 4;
     std::vector<SessionHandshakeEntry> sessionHandshakes_;
     std::vector<SessionHandshakeEntry> sessionHandshakeBuffer_;
     int deletionCandidateIndex_ = -1;

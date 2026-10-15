@@ -105,7 +105,11 @@ private:
     int configSelection_;
     int scrollOffset_;
     static constexpr int CONFIG_OPTION_COUNT = 6;
-    static constexpr int VISIBLE_CONFIG_ITEMS = 4;
+    // Rows the config list can show, set each frame by the renderer from the live layout
+    // and read by the scroll logic so the two can't drift (a count smaller than what fits
+    // scrolls early; larger hides the selection). Seeded to "all options fit" for input
+    // before the first paint.
+    int configVisibleItems_ = CONFIG_OPTION_COUNT;
     
     // Config values
     ProbeFloodMode mode_;

@@ -253,7 +253,8 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     int maxVisibleItems = (footerY - y) / lineHeight;
     if (maxVisibleItems < 1) maxVisibleItems = 1;
-    
+    configVisibleItems_ = maxVisibleItems;  // single source of truth, read by handleUp/Down
+
     // Draw visible options
     for (int i = scrollOffset_; i < CONFIG_OPTION_COUNT && (i - scrollOffset_) < maxVisibleItems; i++) {
         bool selected = (i == configSelection_);
@@ -472,7 +473,7 @@ void ProbeFloodScreen::handleUp() {
         configSelection_--;
         if (configSelection_ < 0) {
             configSelection_ = CONFIG_OPTION_COUNT - 1;
-            scrollOffset_ = CONFIG_OPTION_COUNT - VISIBLE_CONFIG_ITEMS;
+            scrollOffset_ = CONFIG_OPTION_COUNT - configVisibleItems_;
             if (scrollOffset_ < 0) scrollOffset_ = 0;
         }
         if (configSelection_ < scrollOffset_) {
@@ -488,8 +489,8 @@ void ProbeFloodScreen::handleDown() {
             configSelection_ = 0;
             scrollOffset_ = 0;
         }
-        if (configSelection_ >= scrollOffset_ + VISIBLE_CONFIG_ITEMS) {
-            scrollOffset_ = configSelection_ - VISIBLE_CONFIG_ITEMS + 1;
+        if (configSelection_ >= scrollOffset_ + configVisibleItems_) {
+            scrollOffset_ = configSelection_ - configVisibleItems_ + 1;
         }
     }
 }

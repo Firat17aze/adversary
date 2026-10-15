@@ -359,10 +359,9 @@ bool HandshakeScreen::handleInput(char key) {
                 case '.':  // Navigate down
                     if (handshakeListSelection_ < (int)sessionHandshakes_.size() - 1) {
                         handshakeListSelection_++;
-                        // Adjust scroll (assume 4 visible items)
-                        const int visibleItems = 4;
-                        if (handshakeListSelection_ >= handshakeListScroll_ + visibleItems) {
-                            handshakeListScroll_ = handshakeListSelection_ - visibleItems + 1;
+                        // Adjust scroll using the row count drawHandshakeList rendered
+                        if (handshakeListSelection_ >= handshakeListScroll_ + handshakeListVisibleItems_) {
+                            handshakeListScroll_ = handshakeListSelection_ - handshakeListVisibleItems_ + 1;
                         }
                     }
                     return true;
@@ -1451,6 +1450,7 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
     const int16_t listHeight = canvas.height() - HEADER_HEIGHT - FOOTER_HEIGHT - 8;
     const int16_t itemHeight = 14;
     const int16_t visibleItems = listHeight / itemHeight;
+    handshakeListVisibleItems_ = visibleItems;  // single source of truth, read by handleInput
     
     if (sessionHandshakes_.empty()) {
         // Empty state
