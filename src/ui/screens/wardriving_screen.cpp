@@ -8,6 +8,7 @@
 #include "modules/system/time_manager.h"
 #include "modules/wifi/wifi_scanner.h"
 #include "hal/expansion/expansion_cap.h"
+#include "modules/storage/settings_manager.h"
 #include <Arduino.h>
 
 namespace adversary {
@@ -322,6 +323,14 @@ String WardrivingScreen::formatDistance(float km) {
     return String(buffer);
 }
 
+const char* WardrivingScreen::statusHeapText(char* buf, size_t len) const {
+    // The heap badge, when enabled, already renders free heap in the status bar;
+    // only add the centre readout when it is off, so wardriving never shows it twice.
+    if (SettingsManager::getInstance().get().system.showHeapBadge) return nullptr;
+    snprintf(buf, len, "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
+    return buf;
+}
+
 uint16_t WardrivingScreen::getRSSIColor(int8_t rssi) {
     // Color-code signal strength
     if (rssi > -50) {
@@ -372,8 +381,7 @@ void WardrivingScreen::render(Canvas& canvas) {
 
 void WardrivingScreen::drawIdle(Canvas& canvas) {
     char ramBuf[12];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
-    ui::StatusBar::render(canvas, "Wardriving", ramBuf);
+    ui::StatusBar::render(canvas, "Wardriving", statusHeapText(ramBuf, sizeof(ramBuf)));
     
     int16_t y = 22;
     
@@ -410,8 +418,7 @@ void WardrivingScreen::drawIdle(Canvas& canvas) {
 
 void WardrivingScreen::drawScanning(Canvas& canvas) {
     char ramBuf[12];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
-    ui::StatusBar::render(canvas, "Wardriving", ramBuf);
+    ui::StatusBar::render(canvas, "Wardriving", statusHeapText(ramBuf, sizeof(ramBuf)));
     
     auto& manager = wardriving::WardrivingManager::getInstance();
     const auto& session = manager.getSession();
@@ -449,8 +456,7 @@ void WardrivingScreen::drawScanning(Canvas& canvas) {
 
 void WardrivingScreen::drawPaused(Canvas& canvas) {
     char ramBuf[12];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
-    ui::StatusBar::render(canvas, "Wardriving", ramBuf);
+    ui::StatusBar::render(canvas, "Wardriving", statusHeapText(ramBuf, sizeof(ramBuf)));
     
     auto& manager = wardriving::WardrivingManager::getInstance();
     const auto& session = manager.getSession();
@@ -491,8 +497,7 @@ void WardrivingScreen::drawPaused(Canvas& canvas) {
 
 void WardrivingScreen::drawSaving(Canvas& canvas) {
     char ramBuf[12];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
-    ui::StatusBar::render(canvas, "Wardriving", ramBuf);
+    ui::StatusBar::render(canvas, "Wardriving", statusHeapText(ramBuf, sizeof(ramBuf)));
     
     auto& manager = wardriving::WardrivingManager::getInstance();
     const auto& session = manager.getSession();
@@ -619,8 +624,7 @@ void WardrivingScreen::drawSessionStats(Canvas& canvas, int16_t y) {
 
 void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     char ramBuf[12];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
-    ui::StatusBar::render(canvas, "Network Log", ramBuf);
+    ui::StatusBar::render(canvas, "Network Log", statusHeapText(ramBuf, sizeof(ramBuf)));
     
     const int16_t listY = 25;
     const int16_t listHeight = canvas.height() - 45;

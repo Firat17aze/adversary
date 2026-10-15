@@ -82,6 +82,11 @@ private:
     String formatDuration(uint32_t seconds);
     String formatDistance(float km);
     uint16_t getRSSIColor(int8_t rssi);
+
+    // Heap readout for the status-bar centre. Returns nullptr when the global heap
+    // badge is on, so the two never show heap at once (the badge already does, with
+    // health colouring); writes "<n>K" into `buf` and returns it when the badge is off.
+    const char* statusHeapText(char* buf, size_t len) const;
     
     // Member Variables
     WardrivingState state_;
