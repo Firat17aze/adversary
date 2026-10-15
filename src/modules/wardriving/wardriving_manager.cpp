@@ -338,10 +338,11 @@ void WardrivingManager::processWiFiScan() {
     
     for (const auto& net : results) {
         // O(1) lookup: is this BSSID already in our hash set?
-        if (hasSeenBSSID(net.bssid)) {
+        if (hasSeenBSSID(net.bssid, ObservationType::WIFI)) {
             // Already seen - just update pending buffer entry if exists
             for (auto& pending : pendingNetworks_) {
-                if (memcmp(pending.bssid, net.bssid, 6) == 0) {
+                if (pending.type == ObservationType::WIFI &&
+                    memcmp(pending.bssid, net.bssid, 6) == 0) {
                     // Update RSSI if stronger
                     if (net.rssi > pending.rssi) {
                         pending.rssi = net.rssi;
@@ -360,7 +361,7 @@ void WardrivingManager::processWiFiScan() {
         }
         
         // New network! Add to hash set and pending buffer
-        NetworkEntry* entry = addNewNetwork(net.bssid);
+        NetworkEntry* entry = addNewNetwork(net.bssid, ObservationType::WIFI);
         
         if (!entry) {
             // Max networks reached or buffer full
@@ -428,36 +429,38 @@ void WardrivingManager::processGPSUpdate() {
     }
 }
 
-bool WardrivingManager::hasSeenBSSID(const uint8_t* bssid) const {
-    uint64_t hash = hashBSSID(bssid);
-    return seenBSSIDs_.find(hash) != seenBSSIDs_.end();
+bool WardrivingManager::hasSeenBSSID(const uint8_t* bssid, ObservationType type) const {
+    uint64_t key = observationKey(bssid, type);
+    return seenBSSIDs_.find(key) != seenBSSIDs_.end();
 }
 
-NetworkEntry* WardrivingManager::addNewNetwork(const uint8_t* bssid) {
-    uint64_t hash = hashBSSID(bssid);
-    
-    // Check if max networks reached
+NetworkEntry* WardrivingManager::addNewNetwork(const uint8_t* bssid, ObservationType type) {
+    uint64_t key = observationKey(bssid, type);
+
+    // Check if max observations reached (WiFi + BLE share the cap: it bounds the
+    // dedup set's memory, which is type-agnostic).
     if (seenBSSIDs_.size() >= MAX_NETWORKS) {
         return nullptr;
     }
-    
+
     // Add to hash set for future deduplication
-    seenBSSIDs_.insert(hash);
+    seenBSSIDs_.insert(key);
     session_.networksFound++;
-    
+
     // Add to pending buffer for GPS tagging
     // If buffer is full, flush first
     if (pendingNetworks_.size() >= PENDING_BUFFER_SIZE) {
         flushToSD();
     }
-    
+
     // Create new entry in pending buffer
     NetworkEntry entry;
     memcpy(entry.bssid, bssid, 6);
+    entry.type = type;
     entry.firstSeenMs = millis();
     entry.lastSeenMs = entry.firstSeenMs;
     pendingNetworks_.push_back(entry);
-    
+
     return &pendingNetworks_.back();
 }
 
@@ -620,13 +623,15 @@ float WardrivingManager::calculateDistance(double lat1, double lon1, double lat2
     return R * c;  // Distance in kilometers
 }
 
-uint64_t WardrivingManager::hashBSSID(const uint8_t* bssid) const {
-    // Simple hash: combine all 6 bytes into uint64_t
+uint64_t WardrivingManager::observationKey(const uint8_t* mac, ObservationType type) {
+    // Low 48 bits: the 6 MAC bytes (unchanged from the historical BSSID hash, so a
+    // WIFI key == the old value and existing dedup is preserved). High bits: the
+    // observation type, so a BLE BD_ADDR never collides with a same-valued WiFi BSSID.
     uint64_t hash = 0;
     for (int i = 0; i < 6; i++) {
-        hash = (hash << 8) | bssid[i];
+        hash = (hash << 8) | mac[i];
     }
-    return hash;
+    return hash | (static_cast<uint64_t>(type) << 48);
 }
 
 void WardrivingManager::generateSessionId(char* buffer) {

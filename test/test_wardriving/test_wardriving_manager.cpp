@@ -353,6 +353,27 @@ void test_wigle_row_ble(void) {
         row);
 }
 
+/**
+ * @brief A BLE device sharing a WiFi AP's MAC is still recorded (slice-0061 D1).
+ *
+ * WiFi BSSIDs and BLE BD_ADDRs are both 6-byte MACs; a plain MAC-keyed set would let
+ * one suppress the other. The dedup key folds the observation type into the high bits,
+ * so the same MAC yields distinct WIFI/BLE keys while the WIFI key stays byte-for-byte
+ * the historical 48-bit MAC hash (existing WiFi dedup untouched).
+ */
+void test_ble_dedup_vs_wifi(void) {
+    uint8_t mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint64_t wifiKey = WardrivingManager::observationKey(mac, ObservationType::WIFI);
+    uint64_t bleKey  = WardrivingManager::observationKey(mac, ObservationType::BLE);
+
+    // Same MAC, different source -> different keys (no cross-type suppression).
+    TEST_ASSERT_TRUE(wifiKey != bleKey);
+    // WIFI key == the historical low-48-bit MAC hash: existing dedup is unchanged.
+    TEST_ASSERT_TRUE(wifiKey == 0x0000001122334455ULL);
+    // BLE key carries the type tag in bit 48.
+    TEST_ASSERT_TRUE(bleKey == 0x0001001122334455ULL);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_bssid_deduplication);
@@ -366,5 +387,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_session_id_insane_year);
     RUN_TEST(test_wigle_row_wifi_unchanged);
     RUN_TEST(test_wigle_row_ble);
+    RUN_TEST(test_ble_dedup_vs_wifi);
     return UNITY_END();
 }

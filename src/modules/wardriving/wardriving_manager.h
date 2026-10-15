@@ -176,6 +176,22 @@ public:
     static void formatWigleRow(const NetworkEntry& entry, uint32_t currentMillis,
                                time_t currentEpoch, char* out, size_t outLen);
 
+    /**
+     * @brief Compute the deduplication key for an observation (pure, unit-testable).
+     *
+     * A WiFi BSSID and a BLE BD_ADDR are both 6-byte MACs and would collide in a
+     * plain MAC-keyed set, suppressing a BLE device that happens to share a WiFi
+     * AP's address. The 6 MAC bytes occupy the low 48 bits of the key; the
+     * observation type is folded into the high bits so WIFI and BLE MACs never
+     * collide, while the WIFI key stays equal to the historical 48-bit MAC hash
+     * (type WIFI == 0), leaving existing WiFi dedup untouched (slice-0061 D1).
+     *
+     * @param mac  6-byte address (BSSID or BD_ADDR)
+     * @param type Observation source
+     * @return 64-bit dedup key, unique per (mac, type)
+     */
+    static uint64_t observationKey(const uint8_t* mac, ObservationType type);
+
 private:
     WardrivingManager();
     ~WardrivingManager();
@@ -199,18 +215,20 @@ private:
     void processGPSUpdate();
     
     /**
-     * @brief Check if BSSID has been seen before (O(1) lookup)
-     * @param bssid 6-byte MAC address
+     * @brief Check if an observation has been seen before (O(1) lookup)
+     * @param bssid 6-byte MAC address (BSSID or BD_ADDR)
+     * @param type  Observation source (WiFi and BLE dedup independently)
      * @return true if already in hash set
      */
-    bool hasSeenBSSID(const uint8_t* bssid) const;
-    
+    bool hasSeenBSSID(const uint8_t* bssid, ObservationType type) const;
+
     /**
-     * @brief Add new network to pending buffer and hash set
-     * @param bssid 6-byte MAC address
-     * @return Pointer to new entry in pending buffer, nullptr if duplicate
+     * @brief Add new observation to pending buffer and hash set
+     * @param bssid 6-byte MAC address (BSSID or BD_ADDR)
+     * @param type  Observation source (recorded on the entry, selects the WiGLE row)
+     * @return Pointer to new entry in pending buffer, nullptr if duplicate/full
      */
-    NetworkEntry* addNewNetwork(const uint8_t* bssid);
+    NetworkEntry* addNewNetwork(const uint8_t* bssid, ObservationType type);
     
     /**
      * @brief Update network with GPS coordinates
@@ -235,11 +253,6 @@ private:
      * @brief Calculate distance between two GPS points (Haversine formula)
      */
     float calculateDistance(double lat1, double lon1, double lat2, double lon2);
-    
-    /**
-     * @brief Hash BSSID to uint64_t for set storage
-     */
-    uint64_t hashBSSID(const uint8_t* bssid) const;
     
     /**
      * @brief Generate session ID from current time
