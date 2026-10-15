@@ -75,7 +75,14 @@ void BLEScanner::startScan(uint32_t durationSeconds) {
     pScan->setAdvertisedDeviceCallbacks(this);
     pScan->setActiveScan(true); // Active scan for more info (name, services)
     pScan->setInterval(100);
-    pScan->setWindow(99); 
+    pScan->setWindow(99);
+    // Callback-only: after onResult fires, NimBLE erases the device instead of
+    // retaining it in its internal results vector. Without this the vector defaults
+    // to "store all" (maxResults 0xFF) and grows unbounded on a long scan -- fatal
+    // during wardriving BOTH mode, where BLE MAC randomization feeds a constant
+    // stream of new addresses and the free-heap floor is already low (both radios up).
+    // We keep our own capped m_devices list, so NimBLE needs to store nothing.
+    pScan->setMaxResults(0);
 
     // Start asynchronous scan
     if (pScan->start(durationSeconds, nullptr, false)) {
