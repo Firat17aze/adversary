@@ -260,7 +260,7 @@ bool WardrivingScreen::handleInput(char key) {
             
         case WardrivingState::NETWORK_LOG:
             // Navigation
-            if (key == ';' || key == '.' || key == ',') {  // Down
+            if (key == '.') {  // Down (Cardputer keyboard)
                 if (logSelection_ < (int)logCount_ - 1) {
                     logSelection_++;
                     // Scroll if needed
@@ -269,7 +269,7 @@ bool WardrivingScreen::handleInput(char key) {
                     }
                 }
                 return true;
-            } else if (key == '/' ) {  // Up
+            } else if (key == ';') {  // Up (Cardputer keyboard)
                 if (logSelection_ > 0) {
                     logSelection_--;
                     // Scroll if needed
