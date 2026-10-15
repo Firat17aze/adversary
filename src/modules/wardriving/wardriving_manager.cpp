@@ -7,6 +7,9 @@
 #include "../wifi/wifi_scanner.h"
 #include "../gps/gps_manager.h"
 #include "../storage/settings_manager.h"
+#ifdef ARDUINO
+#include "../ble/ble_scanner.h"   // NimBLE; device-only (not in the native build filter)
+#endif
 #include <Arduino.h>
 #include <SD.h>
 #include <cmath>
@@ -137,13 +140,20 @@ void WardrivingManager::discardSession() {
     
     active_ = false;
     paused_ = false;
-    
+
     // Stop any ongoing WiFi scan
     auto& scanner = WiFiScanner::getInstance();
     scanner.stopScan();
-    
+
+#ifdef ARDUINO
+    // Release the BLE controller radio before touching SD (ADR-0060).
+    if (BLEScanner::isInitialized()) {
+        BLEScanner::getInstance().deinit();
+    }
+#endif
+
     delay(100);
-    
+
     // Deleting partial CSV from SD
     if (SD.begin()) {
         if (SD.exists(discardedPath)) {
@@ -168,7 +178,14 @@ void WardrivingManager::stopSession() {
     // Stop any ongoing WiFi scan
     auto& scanner = WiFiScanner::getInstance();
     scanner.stopScan();
-    
+
+#ifdef ARDUINO
+    // Release the BLE controller radio before the WiFi/SD bus recovery below (ADR-0060).
+    if (BLEScanner::isInitialized()) {
+        BLEScanner::getInstance().deinit();
+    }
+#endif
+
     // CRITICAL: WiFi operations can corrupt SPI bus state, preventing SD access
     // Small delay to let WiFi hardware settle before accessing SD card
     delay(100);
@@ -247,13 +264,27 @@ void WardrivingManager::update() {
     }
     
     uint32_t now = millis();
-    
-    // Get scan interval from settings (allows user configuration)
-    uint32_t scanInterval = SettingsManager::getInstance().get().wireless.wardrivingScanIntervalMs;
-    
-    // Process WiFi scans
+
+    // Get scan interval and radio mode from settings (allows user configuration)
+    const auto& wireless = SettingsManager::getInstance().get().wireless;
+    uint32_t scanInterval = wireless.wardrivingScanIntervalMs;
+    RadioMode mode = static_cast<RadioMode>(wireless.wardrivingRadioMode);
+
+    // Process scans per radio mode. WiFi + BLE run concurrently in BOTH mode via
+    // ESP-IDF coexistence -- no application-level interleaving (ADR-0060).
     if (now - lastWiFiScanMs_ >= scanInterval) {
-        processWiFiScan();
+        if (mode == RadioMode::WIFI_ONLY || mode == RadioMode::BOTH) {
+            processWiFiScan();
+        }
+#ifdef ARDUINO
+        if (mode == RadioMode::BLE_ONLY || mode == RadioMode::BOTH) {
+            processBLEScan();
+        } else if (BLEScanner::isInitialized()) {
+            // WiFi-only: release the controller so this session pays neither the
+            // ~58.6 KB heap nor the scan-throughput cost (ADR-0060).
+            BLEScanner::getInstance().deinit();
+        }
+#endif
         lastWiFiScanMs_ = now;
     }
     
@@ -333,64 +364,102 @@ void WardrivingManager::processWiFiScan() {
     }
     
     lastProcessedScanCount_ = scanner.getScanCount();
-    uint32_t now = millis();
     uint32_t newCount = 0;
-    
+
     for (const auto& net : results) {
-        // O(1) lookup: is this BSSID already in our hash set?
-        if (hasSeenBSSID(net.bssid, ObservationType::WIFI)) {
-            // Already seen - just update pending buffer entry if exists
-            for (auto& pending : pendingNetworks_) {
-                if (pending.type == ObservationType::WIFI &&
-                    memcmp(pending.bssid, net.bssid, 6) == 0) {
-                    // Update RSSI if stronger
-                    if (net.rssi > pending.rssi) {
-                        pending.rssi = net.rssi;
-                    }
-                    pending.lastSeenMs = now;
-                    pending.seenCount++;
-                    
-                    // Try to tag with GPS if it doesn't have it yet
-                    if (!pending.hasGPS) {
-                        updateNetworkGPS(&pending);
-                    }
-                    break;
-                }
-            }
-            continue;
+        if (ingestObservation(net.bssid, ObservationType::WIFI, net.rssi, net.channel,
+                              static_cast<uint8_t>(net.security),
+                              net.ssid.empty() ? nullptr : net.ssid.c_str())) {
+            newCount++;
         }
-        
-        // New network! Add to hash set and pending buffer
-        NetworkEntry* entry = addNewNetwork(net.bssid, ObservationType::WIFI);
-        
-        if (!entry) {
-            // Max networks reached or buffer full
-            continue;
-        }
-        
-        newCount++;
-        
-        // Populate metadata
-        entry->rssi = net.rssi;
-        entry->channel = net.channel;
-        entry->encryptionType = static_cast<uint8_t>(net.security);
-        entry->lastSeenMs = now;
-        entry->seenCount = 1;
-        
-        // Copy SSID
-        if (!net.ssid.empty()) {
-            strncpy(entry->ssid, net.ssid.c_str(), sizeof(entry->ssid) - 1);
-        }
-        
-        // Tag with GPS immediately if available
-        updateNetworkGPS(entry);
     }
-    
+
     if (newCount > 0) {
-        LOG_I("WARDRV", "Found %lu new networks (total: %lu)", 
+        LOG_I("WARDRV", "Found %lu new networks (total: %lu)",
               (unsigned long)newCount, (unsigned long)seenBSSIDs_.size());
     }
 }
+
+bool WardrivingManager::ingestObservation(const uint8_t* mac, ObservationType type,
+                                          int rssi, uint8_t channel,
+                                          uint8_t encryptionType, const char* name) {
+    uint32_t now = millis();
+
+    // O(1) lookup: is this (mac, type) already in our hash set?
+    if (hasSeenBSSID(mac, type)) {
+        // Already seen - update the matching pending entry if it is still buffered.
+        for (auto& pending : pendingNetworks_) {
+            if (pending.type == type && memcmp(pending.bssid, mac, 6) == 0) {
+                if (rssi > pending.rssi) {
+                    pending.rssi = static_cast<int8_t>(rssi);
+                }
+                pending.lastSeenMs = now;
+                pending.seenCount++;
+                if (!pending.hasGPS) {
+                    updateNetworkGPS(&pending);
+                }
+                break;
+            }
+        }
+        return false;
+    }
+
+    // New observation.
+    NetworkEntry* entry = addNewNetwork(mac, type);
+    if (!entry) {
+        // Max observations reached or buffer full
+        return false;
+    }
+
+    entry->rssi = static_cast<int8_t>(rssi);
+    entry->channel = channel;
+    entry->encryptionType = encryptionType;
+    entry->lastSeenMs = now;
+    entry->seenCount = 1;
+    if (name && name[0] != '\0') {
+        strncpy(entry->ssid, name, sizeof(entry->ssid) - 1);
+    }
+    updateNetworkGPS(entry);
+    return true;
+}
+
+#ifdef ARDUINO
+void WardrivingManager::processBLEScan() {
+    auto& scanner = BLEScanner::getInstance();
+
+    // Self-initialize: bring the controller + continuous scan up on first use so a
+    // mid-session switch into a BLE mode is safe. init()/startScan() are idempotent.
+    if (!BLEScanner::isInitialized()) {
+        scanner.init();
+    }
+    if (!scanner.isScanning()) {
+        scanner.startScan(0);   // 0 = continuous (manual stop on session end)
+    }
+
+    uint32_t newCount = 0;
+    auto devices = scanner.getDevices();
+    for (const auto& dev : devices) {
+        // NimBLEAddress::getNative() is little-endian; reverse to canonical BD_ADDR
+        // order so the CSV MAC matches the human-readable address (confirm on-device).
+        const uint8_t* native = dev.address.getNative();
+        uint8_t addr[6];
+        for (int i = 0; i < 6; i++) {
+            addr[i] = native[5 - i];
+        }
+
+        // BLE rows carry channel 0 and no WiFi encryption (WiGLE BT/BLE spec, D6).
+        if (ingestObservation(addr, ObservationType::BLE, dev.rssi, 0, 0,
+                              dev.name.empty() ? nullptr : dev.name.c_str())) {
+            newCount++;
+        }
+    }
+
+    if (newCount > 0) {
+        LOG_I("WARDRV", "Found %lu new BLE devices (total: %lu)",
+              (unsigned long)newCount, (unsigned long)seenBSSIDs_.size());
+    }
+}
+#endif
 
 void WardrivingManager::processGPSUpdate() {
     using namespace gps;

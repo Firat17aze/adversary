@@ -31,6 +31,20 @@ enum class ObservationType : uint8_t {
 };
 
 /**
+ * @brief Wardriving radio mode (persisted as WirelessSettings::wardrivingRadioMode).
+ *
+ * Which radios a session scans. WiFi and BLE run concurrently via ESP-IDF software
+ * coexistence in BOTH mode (ADR-0060); there is no application-level time-slicing.
+ * WIFI_ONLY is the default so the stock experience and full AP yield are unchanged
+ * and the BLE controller's ~58.6 KB is never paid unless opted into.
+ */
+enum class RadioMode : uint8_t {
+    WIFI_ONLY = 0,  ///< WiFi active scan only (default)
+    BLE_ONLY  = 1,  ///< BLE scan only
+    BOTH      = 2,  ///< WiFi + BLE concurrently (coexistence)
+};
+
+/**
  * @brief Single network entry with GPS data
  */
 struct NetworkEntry {

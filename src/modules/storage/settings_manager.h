@@ -47,7 +47,8 @@ struct WirelessSettings {
     uint32_t probeFloodIntervalMs = 10;
     uint32_t scanTimeoutMs = 5000;
     uint32_t wardrivingScanIntervalMs = 3000;  // Wardriving WiFi scan frequency (1s-10s)
-    
+    uint8_t wardrivingRadioMode = 0;           // 0=WiFi-only (default), 1=BLE-only, 2=Both (ADR-0060)
+
     char fixedBleMac[18] = {0}; // Persistent MAC for BLE HID (format: "AA:BB:CC:DD:EE:FF")
     char bleName[33] = "Universal Key"; // Custom BLE Broadcast Name
     uint16_t bleAppearance = 0x03C1; // Default: Keyboard
@@ -421,7 +422,8 @@ inline bool SettingsManager::load() {
         settings_.wireless.scanTimeoutMs = wireless["scanTimeoutMs"] | 5000;
         settings_.wireless.scanTimeoutMs = wireless["scanTimeoutMs"] | 5000;
         settings_.wireless.wardrivingScanIntervalMs = wireless["wardrivingScanIntervalMs"] | 3000;
-        
+        settings_.wireless.wardrivingRadioMode = wireless["wardrivingRadioMode"] | 0;
+
         const char* fixedMac = wireless["fixedBleMac"] | "";
         strncpy(settings_.wireless.fixedBleMac, fixedMac, 17);
         settings_.wireless.fixedBleMac[17] = '\0';
@@ -570,7 +572,8 @@ inline bool SettingsManager::save() {
     wireless["scanTimeoutMs"] = settings_.wireless.scanTimeoutMs;
     wireless["scanTimeoutMs"] = settings_.wireless.scanTimeoutMs;
     wireless["wardrivingScanIntervalMs"] = settings_.wireless.wardrivingScanIntervalMs;
-    
+    wireless["wardrivingRadioMode"] = settings_.wireless.wardrivingRadioMode;
+
     if (settings_.wireless.fixedBleMac[0] != '\0') {
         wireless["fixedBleMac"] = settings_.wireless.fixedBleMac;
     }

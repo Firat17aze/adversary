@@ -208,7 +208,36 @@ private:
      * @brief Process WiFi scan results
      */
     void processWiFiScan();
-    
+
+    /**
+     * @brief Process BLE scan results (device-only; harvests BLEScanner devices).
+     *
+     * Mirrors processWiFiScan for the BLE source: maps each discovered advertiser to
+     * an observation and feeds it through ingestObservation. Self-initializes the
+     * NimBLE controller and continuous scan on first call so it is safe when the mode
+     * is switched to BLE mid-session (ADR-0060 / slice-0061 D3).
+     */
+    void processBLEScan();
+
+    /**
+     * @brief Ingest one observation into the shared dedup/pending/GPS pipeline.
+     *
+     * The single code path both scan sources use (slice-0061 D1): dedup by
+     * (mac, type), update the pending entry's RSSI/last-seen on a re-sighting, or add
+     * a new entry and GPS-tag it. Keeps processWiFiScan/processBLEScan as thin,
+     * source-specific mappers rather than duplicating the pipeline glue.
+     *
+     * @param mac            6-byte address (BSSID or BD_ADDR)
+     * @param type           Observation source
+     * @param rssi           Signal strength (dBm)
+     * @param channel        WiFi channel, or 0 for BLE
+     * @param encryptionType WiFi security enum value, or 0 for BLE (unused in the row)
+     * @param name           SSID / BLE device name (may be null/empty)
+     * @return true if a new entry was added, false if it was a known duplicate/full
+     */
+    bool ingestObservation(const uint8_t* mac, ObservationType type, int rssi,
+                           uint8_t channel, uint8_t encryptionType, const char* name);
+
     /**
      * @brief Process GPS updates and calculate distance
      */
