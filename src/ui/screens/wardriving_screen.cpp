@@ -264,7 +264,7 @@ bool WardrivingScreen::handleInput(char key) {
                 if (logSelection_ < (int)logCount_ - 1) {
                     logSelection_++;
                     // Scroll if needed
-                    if (logSelection_ - logScroll_ >= 7) {  // 7 visible items
+                    if (logSelection_ - logScroll_ >= logVisibleItems_) {
                         logScroll_++;
                     }
                 }
@@ -626,10 +626,11 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     char ramBuf[12];
     ui::StatusBar::render(canvas, "Network Log", statusHeapText(ramBuf, sizeof(ramBuf)));
     
-    const int16_t listY = 25;
-    const int16_t listHeight = canvas.height() - 45;
     const int16_t itemHeight = 14;
+    const int16_t listY = ui::STATUS_BAR_HEIGHT + 1;                         // sit just under the bar
+    const int16_t listHeight = canvas.height() - listY - ui::FOOTER_HEIGHT;  // ...down to the footer
     const int16_t visibleItems = listHeight / itemHeight;
+    logVisibleItems_ = visibleItems;  // single source of truth, read back by handleInput
     
     if (logCount_ == 0) {
         canvas.setTextColor(theme::TEXT_DISABLED());

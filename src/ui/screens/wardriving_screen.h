@@ -113,6 +113,11 @@ private:
     // Scroll state for network log
     int logScroll_;
     int logSelection_;
+    // Rows the log list can show, derived from the live layout in drawNetworkLog and
+    // read back by handleInput so the scroll threshold can never drift from what is
+    // actually rendered (the prior hard-coded 7 vs a rendered 6 pushed the selection
+    // off-screen). Seeded with the current layout's value for input before first paint.
+    int logVisibleItems_ = 7;
     
     // UI Components
     ui::FooterHints footerHints_;
