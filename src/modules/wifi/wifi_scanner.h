@@ -32,6 +32,16 @@ enum class WiFiSecurity : uint8_t {
 };
 
 /**
+ * @brief Human-readable short label for a security type.
+ *
+ * Single source of truth for the UI label of a WiFiSecurity value. Every screen
+ * that shows a security type must call this instead of switching on the enum: a
+ * hand-rolled copy silently drifts when the enum grows (the wardriving log screen
+ * mislabelled WPA/WPA2, Enterprise and WPA3, and showed "?" for WPA2/WPA3).
+ */
+const char* wifiSecurityToString(WiFiSecurity security);
+
+/**
  * @brief Information about a discovered WiFi network
  */
 struct NetworkInfo {

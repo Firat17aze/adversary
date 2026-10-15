@@ -333,20 +333,6 @@ uint16_t WardrivingScreen::getRSSIColor(int8_t rssi) {
     }
 }
 
-const char* WardrivingScreen::getSecurityString(uint8_t security) {
-    // Map WiFiSecurity enum to short strings
-    switch (security) {
-        case 0:  return "Open";
-        case 1:  return "WEP";
-        case 2:  return "WPA";
-        case 3:  return "WPA2";
-        case 4:  return "WPA3";
-        case 5:  return "WPA/2";
-        case 6:  return "WPA2/3";
-        default: return "?";
-    }
-}
-
 // ============================================================================
 // Rendering
 // ============================================================================
@@ -683,7 +669,7 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
         canvas.printf("Ch%d", net.channel);
         
         canvas.setCursor(canvas.width() - 60, y + 2);
-        canvas.print(getSecurityString(net.security));
+        canvas.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
         
         uint16_t rssiColor = getRSSIColor(net.rssi);
         canvas.setTextColor(rssiColor);

@@ -27,7 +27,7 @@ std::string NetworkInfo::getBssidString() const {
     return std::string(buf);
 }
 
-const char* NetworkInfo::getSecurityString() const {
+const char* wifiSecurityToString(WiFiSecurity security) {
     switch (security) {
         case WiFiSecurity::OPEN:           return "OPEN";
         case WiFiSecurity::WEP:            return "WEP";
@@ -39,6 +39,10 @@ const char* NetworkInfo::getSecurityString() const {
         case WiFiSecurity::WPA2_WPA3_PSK:  return "WPA2/3";
         default:                           return "???";
     }
+}
+
+const char* NetworkInfo::getSecurityString() const {
+    return wifiSecurityToString(security);
 }
 
 uint8_t NetworkInfo::getSignalQuality() const {

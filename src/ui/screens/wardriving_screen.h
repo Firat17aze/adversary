@@ -82,7 +82,6 @@ private:
     String formatDuration(uint32_t seconds);
     String formatDistance(float km);
     uint16_t getRSSIColor(int8_t rssi);
-    const char* getSecurityString(uint8_t security);
     
     // Member Variables
     WardrivingState state_;
