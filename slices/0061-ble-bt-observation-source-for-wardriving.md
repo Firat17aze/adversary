@@ -145,3 +145,41 @@ holds. This is the measurement, not a guess.
 _(filled at merge: the confirmed WiGLE BLE field spec, the measured `Both`-mode heap floor
 and the margin threshold it set, the native test results, and on-device confirmation of
 both row types + unchanged WiFi-only behaviour.)_
+
+Shipped as specified; all six DoD scenarios met.
+
+**WiGLE BLE field spec (D6).** Confirmed against WiGLE's `WigleWifi-1.4` CSV spec: BLE rows
+carry AuthMode `Misc [LE]` (the spec's reference BLE example), Channel `0` ("0 for Bluetooth
+devices"), and Type `BLE`. Classic-BT (`Type=BT`) stayed out of scope — NimBLE is BLE-only.
+
+**Formatter + type-aware dedup (D1/D2).** `formatWigleRow()` ships as a pure, SD/display-
+free static that branches on `entry.type`; `writeNetworkToCSV` builds its line through it.
+Dedup folds `ObservationType` into bit 48+ of the 64-bit observation key, so a WiFi BSSID
+and a BLE address of equal bytes never collide, and the WIFI key stays byte-identical to
+the historical hash.
+
+**Native tests.** `test_wigle_row_wifi_unchanged`, `test_wigle_row_ble`,
+`test_ble_dedup_vs_wifi` added and green; full native suite 825/825.
+
+**On-device (Cardputer ADV, 2026-10-15).** WiFi-only wrote only WIFI rows and never brought
+the BLE controller up (byte-for-byte the old behaviour). A BOTH session wrote both types to
+one CSV (42 WIFI + 110 BLE), BLE rows spec-correct
+(`74:52:DA:BC:37:C7,"LENOVO",Misc [LE],...,0,-97,...,BLE`), MACs in canonical byte order
+(vendor OUIs resolve), GPS-tagged.
+
+**Heap floor (DoD scenario 5 / D7).** The first field run drained to OOM in ~20-25 min. Root
+cause was not the dedup set (~1.2 KB for 152 uniques) but `NimBLEScan` defaulting to store-
+all (`maxResults 0xFF`), accumulating every randomised BLE MAC for the scan's lifetime. Fixed
+by `setMaxResults(0)` (callback-only; commit `f0a8b8e`). After the fix the BOTH-mode floor
+holds steady at ~30 KB with no drain; WiFi-only floor ~80 KB. Both stay clear of the OOM
+boundary.
+
+**Controller reclaim (DoD scenario 4).** Measured on stop: BOTH exit leaves ~85 KB free,
+WiFi-only exit ~86 KB — identical within noise, confirming `BLEScanner::deinit(false)`
+returns the ~58.6 KB BLE controller heap. The ~64 KB gap from a pristine 149 KB cold boot is
+the WiFi-STA operational baseline (present with or without BLE, matching the historical
+~81 KB "Session started" figure), not a BLE leak.
+
+**Deferred (ledger, outside this DoD):** the live on-screen list doesn't render BLE entries
+in BOTH mode, and the log up-arrow doesn't scroll. Both tracked for a focused wardriving-UI
+pass.
