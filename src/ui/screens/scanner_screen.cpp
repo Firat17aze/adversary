@@ -27,8 +27,6 @@ static void publishAttackTarget(ScreenId target, const NetworkInfo& net) {
 
 ScannerScreen::ScannerScreen()
     : m_scanner(WiFiScanner::getInstance())
-    , m_selectedIndex(0)
-    , m_scrollOffset(0)
     , m_sortMode(SortMode::SIGNAL)
     , m_active(false)
     , m_shouldExit(false)
@@ -58,8 +56,7 @@ void ScannerScreen::deinit() {
 
 void ScannerScreen::init() {
     m_scanner.init();
-    m_selectedIndex = 0;
-    m_scrollOffset = 0;
+    m_list.setItemCount(0);  // fresh screen: no results yet, selection and scroll reset to top
     m_needsRedraw = true;
     m_lastNetworkCount = 0;
     m_lastUpdate = 0;  // Force redraw on next render
@@ -85,8 +82,7 @@ void ScannerScreen::show() {
     m_active = true;
     m_shouldExit = false;
     m_needsRedraw = true;
-    m_selectedIndex = 0;
-    m_scrollOffset = 0;
+    m_list.setItemCount(0);  // fresh screen: no results yet, selection and scroll reset to top
     
     // Initialize footer hints (Enter/Back are universal, not shown)
     footerHints_.setHints({
@@ -105,10 +101,9 @@ void ScannerScreen::show() {
                     applySort();
                     m_needsRedraw = true;
                     
-                    // Keep selection in bounds
-                    if (m_selectedIndex >= m_scanner.getNetworkCount() && m_scanner.getNetworkCount() > 0) {
-                        m_selectedIndex = m_scanner.getNetworkCount() - 1;
-                    }
+                    // Sync the list to the new result count; the model clamps the selection
+                    // (and scroll) back into range if the list shrank.
+                    m_list.setItemCount((int)m_scanner.getNetworkCount());
                 }
             }
         );
@@ -213,13 +208,8 @@ bool ScannerScreen::handleInput(char key) {
             if (key >= '0' && key <= '9') {
                 size_t target = (key == '0') ? 9 : (key - '1');
                 if (target < m_scanner.getNetworkCount()) {
-                    m_selectedIndex = target;
-                    // Adjust scroll
-                    if (m_selectedIndex < m_scrollOffset) {
-                        m_scrollOffset = m_selectedIndex;
-                    } else if (m_selectedIndex >= m_scrollOffset + VISIBLE_ENTRIES) {
-                        m_scrollOffset = m_selectedIndex - VISIBLE_ENTRIES + 1;
-                    }
+                    m_list.setItemCount((int)m_scanner.getNetworkCount());
+                    m_list.setSelectedIndex((int)target);  // scrolls it into view
                 }
                 return true;
             }
@@ -230,27 +220,19 @@ bool ScannerScreen::handleInput(char key) {
 }
 
 void ScannerScreen::navigateUp() {
-    int n = (int)m_scanner.getNetworkCount();
-    if (n <= 0) return;
-    int sel = ((int)m_selectedIndex - 1 + n) % n;  // wraps to last
-    m_selectedIndex = (size_t)sel;
+    m_list.setItemCount((int)m_scanner.getNetworkCount());
+    m_list.moveUp();  // wraps to last; model keeps the selection on screen
     m_needsRedraw = true;
-    if (sel < (int)m_scrollOffset) m_scrollOffset = sel;
-    else if (sel >= (int)m_scrollOffset + VISIBLE_ENTRIES) m_scrollOffset = sel - VISIBLE_ENTRIES + 1;
 }
 
 void ScannerScreen::navigateDown() {
-    int n = (int)m_scanner.getNetworkCount();
-    if (n <= 0) return;
-    int sel = ((int)m_selectedIndex + 1) % n;  // wraps to first
-    m_selectedIndex = (size_t)sel;
+    m_list.setItemCount((int)m_scanner.getNetworkCount());
+    m_list.moveDown();  // wraps to first; model keeps the selection on screen
     m_needsRedraw = true;
-    if (sel >= (int)m_scrollOffset + VISIBLE_ENTRIES) m_scrollOffset = sel - VISIBLE_ENTRIES + 1;
-    else if (sel < (int)m_scrollOffset) m_scrollOffset = sel;
 }
 
 void ScannerScreen::selectCurrent() {
-    const NetworkInfo* net = m_scanner.getNetwork(m_selectedIndex);
+    const NetworkInfo* net = m_scanner.getNetwork(static_cast<size_t>(m_list.selectedIndex()));
     if (net) {
         // Store selected network for use when action is chosen
         m_selectedNetwork = *net;
@@ -485,8 +467,9 @@ void ScannerScreen::render(Canvas& canvas) {
     int16_t contentY = HEADER_HEIGHT;
     int16_t footerHeight = ui::FOOTER_HEIGHT;
     int16_t contentHeight = screenHeight - HEADER_HEIGHT - footerHeight;
-    size_t maxVisible = contentHeight / ENTRY_HEIGHT;
-    
+
+    m_list.setItemCount((int)networks.size());
+
     if (networks.empty()) {
         canvas.setTextColor(theme::TEXT_DISABLED());
         canvas.setTextSize(1);
@@ -503,28 +486,12 @@ void ScannerScreen::render(Canvas& canvas) {
             canvas.print(spinChars[spin++ % 4]);
         }
     } else {
-        size_t endIndex = std::min(m_scrollOffset + maxVisible, networks.size());
-        
-        for (size_t i = m_scrollOffset; i < endIndex; i++) {
-            int16_t entryY = contentY + (i - m_scrollOffset) * ENTRY_HEIGHT;
-            bool isSelected = (i == m_selectedIndex);
-            drawNetworkEntry(canvas, networks[i], entryY, isSelected);
-        }
-        
-        // Scroll indicators
-        if (m_scrollOffset > 0) {
-            canvas.fillTriangle(screenWidth - 8, contentY + 4,
-                                 screenWidth - 12, contentY + 10,
-                                 screenWidth - 4, contentY + 10,
-                                 theme::ACCENT());
-        }
-        if (endIndex < networks.size()) {
-            int16_t bottomY = contentY + contentHeight - 4;
-            canvas.fillTriangle(screenWidth - 8, bottomY,
-                                 screenWidth - 12, bottomY - 6,
-                                 screenWidth - 4, bottomY - 6,
-                                 theme::ACCENT());
-        }
+        // The shared component derives the visible-row count from the content rect, keeps the
+        // selection on screen, and draws the unified thumb (replacing the up/down triangles).
+        ScrollableList::render(canvas, m_list, 0, contentY, screenWidth, contentHeight, ENTRY_HEIGHT,
+            [this, &networks](Canvas& c, int idx, int16_t entryY, bool isSelected) {
+                drawNetworkEntry(c, networks[idx], entryY, isSelected);
+            });
     }
     
     // Update sort hint label with current criteria

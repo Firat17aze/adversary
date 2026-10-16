@@ -19,6 +19,8 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
 #include "ui/components/text_input_popup.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "modules/wifi/wifi_connection.h"
 #include "screen_interface.h"
 #include <cstdint>
@@ -83,7 +85,7 @@ public:
     void toggleScan();
     void cycleSortMode();
     
-    size_t getSelectedIndex() const { return m_selectedIndex; }
+    size_t getSelectedIndex() const { return static_cast<size_t>(m_list.selectedIndex()); }
     bool isActive() const { return m_active; }
     void setActive(bool active);
 
@@ -100,8 +102,9 @@ private:
     void handleAction(char action);
     
     WiFiScanner& m_scanner;
-    size_t m_selectedIndex;
-    size_t m_scrollOffset;
+    // Selection + scroll window for the network list (slice-0062). Item count is kept in sync
+    // with the live scanner results; the renderer supplies the viewport each frame.
+    ListScrollModel m_list;
     SortMode m_sortMode;
     bool m_active;
     bool m_shouldExit;
@@ -126,7 +129,6 @@ private:
     static constexpr int16_t HEADER_HEIGHT = 20;
     static constexpr int16_t STATUS_HEIGHT = 16;
     static constexpr int16_t ENTRY_HEIGHT = 24;
-    static constexpr int16_t VISIBLE_ENTRIES = 4;
     static constexpr uint32_t REDRAW_INTERVAL_MS = 500;
 };
 
