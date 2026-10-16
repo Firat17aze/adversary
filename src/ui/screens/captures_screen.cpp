@@ -89,8 +89,6 @@ CapturesScreen::CapturesScreen()
     , pendingLoad_(0)
     , pendingRefresh_(0)
     , pendingUpload_(0)
-    , selection_(0)
-    , scrollOffset_(0)
 {
     memset(categoryCounts_, 0, sizeof(categoryCounts_));
     memset(credentialSSID_, 0, sizeof(credentialSSID_));
@@ -397,8 +395,7 @@ bool CapturesScreen::handleInput(char key) {
                     files_.clear();  // Clear for loading state
                     pendingLoad_ = 2;  // Countdown: 2->1 (render) -> 0 (load)
                     screenState_ = CapturesScreenState::FILE_LIST;
-                    selection_ = 0;
-                    scrollOffset_ = 0;
+                    fileList_.setItemCount(0);  // Reset selection + scroll to the top for the new category
                     needsRedraw_ = true;
                     return true;
                 case '`':
@@ -420,23 +417,13 @@ bool CapturesScreen::handleInput(char key) {
             // List navigation and direct key shortcuts
             switch (key) {
                 case ';': {  // Up (wraps to last)
-                    int n = (int)getListSize();
-                    if (n > 0) {
-                        selection_ = (selection_ - 1 + n) % n;
-                        if (selection_ < scrollOffset_) scrollOffset_ = selection_;
-                        else if (selection_ >= scrollOffset_ + VISIBLE_FILES)
-                            scrollOffset_ = selection_ - VISIBLE_FILES + 1;
-                    }
+                    fileList_.setItemCount((int)getListSize());
+                    fileList_.moveUp();
                     return true;
                 }
                 case '.': {  // Down (wraps to first)
-                    int n = (int)getListSize();
-                    if (n > 0) {
-                        selection_ = (selection_ + 1) % n;
-                        if (selection_ >= scrollOffset_ + VISIBLE_FILES)
-                            scrollOffset_ = selection_ - VISIBLE_FILES + 1;
-                        else if (selection_ < scrollOffset_) scrollOffset_ = selection_;
-                    }
+                    fileList_.setItemCount((int)getListSize());
+                    fileList_.moveDown();
                     return true;
                 }
                 case 'd':
@@ -467,7 +454,7 @@ bool CapturesScreen::handleInput(char key) {
                         openUploadMenu();
                     } else if (getListSize() > 0 && selectedCategory_ == CaptureCategory::WARDRIVING && !pendingWigleUpload_) {
                         showToast("Uploading to WiGLE...");
-                        int sel = selection_;
+                        int sel = fileList_.selectedIndex();
                         if (sel >= 0 && sel < (int)files_.size()) {
                             strncpy(pendingWigleFilename_, files_[sel].name, sizeof(pendingWigleFilename_));
                             pendingWigleFilename_[sizeof(pendingWigleFilename_) - 1] = '\0';
@@ -507,9 +494,7 @@ bool CapturesScreen::handleInput(char key) {
                         init();
                     } else {
                         screenState_ = CapturesScreenState::FILE_LIST;
-                        if (selection_ >= (int)getListSize()) {
-                            selection_ = getListSize() - 1;
-                        }
+                        fileList_.setItemCount((int)getListSize());  // Clamps selection onto the shrunk list
                     }
                     return true;
                 case 'n':
@@ -663,7 +648,7 @@ void CapturesScreen::loadFileList() {
 void CapturesScreen::deleteSelectedFile() {
 #ifdef ESP32
     size_t listSize = getListSize();
-    int sel = selection_;
+    int sel = fileList_.selectedIndex();
     if (sel < 0 || sel >= (int)listSize) return;
     
     const char* path = getCategoryPath(selectedCategory_);
@@ -745,7 +730,7 @@ void CapturesScreen::enqueueSyncJobs(bool selectedOnly) {
     const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
 
     if (selectedOnly) {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel >= 0 && sel < (int)handshakeIndices_.size()) {
             size_t r = handshakeIndices_[sel];
             if (r < summaries.size()) appendJobsForIndex(syncQueue_, summaries[r], wpaKeyed, pcKeyed);
@@ -776,7 +761,7 @@ int CapturesScreen::countPendingSyncJobs(bool selectedOnly) const {
         if (pcKeyed && s.pwncrackStatus == WpaSecStatus::NOT_UPLOADED && s.has22000) n++;
     };
     if (selectedOnly) {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel >= 0 && sel < (int)handshakeIndices_.size()) {
             size_t r = handshakeIndices_[sel];
             if (r < summaries.size()) countOne(summaries[r]);
@@ -807,7 +792,7 @@ int CapturesScreen::countPendingSyncCaptures(bool selectedOnly) const {
                (pcKeyed && s.pwncrackStatus == WpaSecStatus::NOT_UPLOADED && s.has22000);
     };
     if (selectedOnly) {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel >= 0 && sel < (int)handshakeIndices_.size()) {
             size_t r = handshakeIndices_[sel];
             if (r < summaries.size() && pending(summaries[r])) n++;
@@ -905,7 +890,7 @@ const char* CapturesScreen::getSelectedFilename() const {
     static char derivedFilename[64];  // Static buffer for derived filename
     
     if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel < 0 || sel >= (int)handshakeIndices_.size()) return nullptr;
         size_t regIdx = handshakeIndices_[sel];
         const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
@@ -914,7 +899,7 @@ const char* CapturesScreen::getSelectedFilename() const {
         summaries[regIdx].getFilename(derivedFilename, sizeof(derivedFilename));
         return derivedFilename;
     } else {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel < 0 || sel >= (int)files_.size()) return nullptr;
         return files_[sel].name;
     }
@@ -922,14 +907,14 @@ const char* CapturesScreen::getSelectedFilename() const {
 
 uint32_t CapturesScreen::getSelectedSize() const {
     if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel < 0 || sel >= (int)handshakeIndices_.size()) return 0;
         size_t regIdx = handshakeIndices_[sel];
         const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
         if (regIdx >= summaries.size()) return 0;
         return summaries[regIdx].size;
     } else {
-        int sel = selection_;
+        int sel = fileList_.selectedIndex();
         if (sel < 0 || sel >= (int)files_.size()) return 0;
         return files_[sel].size;
     }
@@ -1024,7 +1009,7 @@ void CapturesScreen::loadCredentials() {
     memset(credentialSSID_, 0, sizeof(credentialSSID_));
     
 #ifdef ESP32
-    int sel = selection_;
+    int sel = fileList_.selectedIndex();
     if (sel < 0 || sel >= (int)files_.size()) return;
     
     const char* path = getCategoryPath(selectedCategory_);
@@ -1161,7 +1146,7 @@ void CapturesScreen::render(Canvas& canvas) {
             // Set item count on right side (e.g., "1/10")
             if (hasFiles) {
                 static char countBuf[16];
-                snprintf(countBuf, sizeof(countBuf), "%d/%zu", selection_ + 1, getListSize());
+                snprintf(countBuf, sizeof(countBuf), "%d/%zu", fileList_.selectedIndex() + 1, getListSize());
                 footerHints_.setRightContent(countBuf);
             } else {
                 footerHints_.setRightContent(nullptr);
@@ -1182,7 +1167,7 @@ void CapturesScreen::render(Canvas& canvas) {
             drawFileInfo(canvas);
             // Show M:Mask hint for cracked handshakes
             {
-                int sel = selection_;
+                int sel = fileList_.selectedIndex();
                 bool isCracked = false;
                 if (selectedCategory_ == CaptureCategory::HANDSHAKES &&
                     sel >= 0 && sel < (int)wpaSecStatusCache_.size()) {
@@ -1249,11 +1234,11 @@ void CapturesScreen::drawCategorySelect(Canvas& canvas) {
         bool selected = (i == categorySelection_);
         
         if (selected) {
-            canvas.fillRect(0, y, screenWidth, lineHeight, theme::ACCENT());
+            canvas.fillRect(0, y, screenWidth, lineHeight, theme::BG_SELECTED());
         }
-        
-        // Selected text uses BG_PRIMARY for contrast with ACCENT background
-        canvas.setTextColor(selected ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY());
+
+        // BG_SELECTED() is a subtle band, so the text keeps its normal colour on the selected row
+        canvas.setTextColor(theme::TEXT_PRIMARY());
         canvas.setCursor(8, y + 4);
         canvas.print(names[i]);
         
@@ -1275,8 +1260,7 @@ void CapturesScreen::drawCategorySelect(Canvas& canvas) {
 void CapturesScreen::drawFileList(Canvas& canvas) {
     int16_t y = HEADER_HEIGHT + 2;
     int16_t screenWidth = canvas.width();
-    const int16_t lineHeight = 20;
-    
+
     canvas.setTextSize(1);
     
     if (pendingLoad_) {
@@ -1299,126 +1283,101 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
         return;
     }
     
-    int scrollOff = scrollOffset_;
-    int selectedIdx = selection_;
-    int endIdx = scrollOff + VISIBLE_FILES;
-    if (endIdx > (int)listSize) endIdx = listSize;
-    
     // For HANDSHAKES, access registry directly via indices
     const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
-    
-    for (int i = scrollOff; i < endIdx; i++) {
-        bool selected = (i == selectedIdx);
-        
-        // Get file data based on category
-        static char fileNameBuf[64];  // Static buffer for derived filename
-        const char* fileName = nullptr;
-        uint32_t fileSize = 0;
-        WpaSecStatus wpaStatus = WpaSecStatus::NOT_UPLOADED;
-        
-        if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-            // Access via index into registry summaries
-            size_t regIdx = handshakeIndices_[i];
-            // Derive filename from SSID
-            summaries[regIdx].getFilename(fileNameBuf, sizeof(fileNameBuf));
-            fileName = fileNameBuf;
-            fileSize = summaries[regIdx].size;
-            
-            // Get WPA-SEC status from summary (now stored in registry)
-            wpaStatus = wpaSecStatusCache_[i];
-        } else {
-            // For CREDENTIALS/PACKETS, use files_ vector
-            fileName = files_[i].name;
-            fileSize = files_[i].size;
-        }
-        
-        // Only show list selection highlight when footer doesn't have focus
-        if (selected && !footerHints_.hasFocus()) {
-            canvas.fillRect(0, y, screenWidth, lineHeight, theme::ACCENT());
-        }
-        
-        int16_t textX = 4;
-        
-        // Draw status circles for handshakes (WPA-SEC) and wardriving (WiGLE)
-        if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-            // Single combined dot across both cracking services: best outcome wins
-            // (cracked > uploaded), else fall back to WPA-SEC's view. We do NOT mix
-            // pwncrack's negative states in — its status defaults to NOT_UPLOADED
-            // for every capture even when unkeyed, which would wrongly turn
-            // incomplete/invalid rows red. FILE INFO shows the per-service detail.
-            WpaSecStatus pcStatus = summaries[handshakeIndices_[i]].pwncrackStatus;
-            WpaSecStatus combined = wpaStatus;
-            if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
-                combined = WpaSecStatus::CRACKED;
-            } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
-                combined = WpaSecStatus::UPLOADED;
+
+    // The shared component owns the scroll window and the one unified thumb; this screen keeps only
+    // the per-row appearance. The viewport (VISIBLE_FILES rows) is derived from the rect height, so
+    // the input logic (moveUp/moveDown) and the renderer can't disagree on how many rows fit.
+    fileList_.setItemCount((int)listSize);
+    ScrollableList::render(canvas, fileList_, 0, y, screenWidth, VISIBLE_FILES * ROW_HEIGHT, ROW_HEIGHT,
+        [this, &summaries](Canvas& c, int i, int16_t rowY, bool selected) {
+            // Get file data based on category
+            static char fileNameBuf[64];  // Static buffer for derived filename
+            const char* fileName = nullptr;
+            uint32_t fileSize = 0;
+            WpaSecStatus wpaStatus = WpaSecStatus::NOT_UPLOADED;
+
+            if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
+                // Access via index into registry summaries
+                size_t regIdx = handshakeIndices_[i];
+                // Derive filename from SSID
+                summaries[regIdx].getFilename(fileNameBuf, sizeof(fileNameBuf));
+                fileName = fileNameBuf;
+                fileSize = summaries[regIdx].size;
+
+                // Get WPA-SEC status from summary (now stored in registry)
+                wpaStatus = wpaSecStatusCache_[i];
+            } else {
+                // For CREDENTIALS/PACKETS, use files_ vector
+                fileName = files_[i].name;
+                fileSize = files_[i].size;
             }
 
-            uint16_t circleColor;
-            switch (combined) {
-                case WpaSecStatus::NOT_UPLOADED: circleColor = theme::ERROR();         break;  // Red
-                case WpaSecStatus::UPLOADED:     circleColor = theme::WARNING();       break;  // Orange
-                case WpaSecStatus::CRACKED:      circleColor = theme::SUCCESS();       break;  // Green
-                case WpaSecStatus::INVALID:      circleColor = theme::TEXT_DISABLED(); break;  // Gray
-                case WpaSecStatus::INCOMPLETE:   circleColor = 0xFFFF;                 break;  // White
-                default:                         circleColor = theme::ERROR();
+            // Only show list selection highlight when footer doesn't have focus. Uses the app-wide
+            // BG_SELECTED() standard (not the bright ACCENT bar this screen drew before slice-0062).
+            if (selected && !footerHints_.hasFocus()) {
+                c.fillRect(0, rowY, c.width(), ROW_HEIGHT, theme::BG_SELECTED());
             }
-            canvas.fillCircle(8, y + 6, 4, circleColor);  // single dot (original style)
-            textX = 18;  // Offset for circle
-        } else if (selectedCategory_ == CaptureCategory::WARDRIVING) {
-            int16_t circleX = 8;
-            int16_t circleY = y + 6;
-            int16_t radius = 4;
-            
-            WigleStatus wigleStatus = WigleService::getInstance().getStatus(fileName);
-            uint16_t circleColor = (wigleStatus == WigleStatus::UPLOADED) 
-                                   ? theme::SUCCESS() : theme::ERROR();
-            
-            canvas.fillCircle(circleX, circleY, radius, circleColor);
-            textX = 18;
-        }
-        
-        // Filename - use selected style only when list has focus
-        bool showAsSelected = selected && !footerHints_.hasFocus();
-        canvas.setTextColor(showAsSelected ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY());
-        canvas.setCursor(textX, y + 2);
-        
-        char displayName[32];
-        int maxLen = (selectedCategory_ == CaptureCategory::HANDSHAKES) ? 24 : 28;
-        strncpy(displayName, fileName, maxLen);
-        displayName[maxLen] = '\0';
-        if ((int)strlen(fileName) > maxLen) {
-            strcat(displayName, "...");
-        }
-        canvas.print(displayName);
-        
-        // Size on second line
-        canvas.setTextColor(showAsSelected ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY());
-        canvas.setCursor(textX, y + 11);
-        canvas.print(formatSize(fileSize));
-        
-        // Type badge moved to FILE INFO screen to avoid metadata loading in list
-        
-        y += lineHeight;
-    }
-    
-    // Draw vertical scrollbar when items exceed visible count
-    if (listSize > VISIBLE_FILES) {
-        int16_t barX = screenWidth - 5;
-        int16_t barY = HEADER_HEIGHT + 2;
-        int16_t barHeight = VISIBLE_FILES * lineHeight - 2;
-        
-        // Track background
-        canvas.fillRect(barX, barY, 4, barHeight, theme::BG_TERTIARY());
-        
-        // Thumb - size proportional to visible/total items
-        int16_t thumbHeight = (VISIBLE_FILES * barHeight) / listSize;
-        if (thumbHeight < 6) thumbHeight = 6;
-        
-        int maxScroll = listSize - VISIBLE_FILES;
-        int16_t thumbY = barY + (scrollOff * (barHeight - thumbHeight)) / maxScroll;
-        canvas.fillRect(barX, thumbY, 4, thumbHeight, theme::ACCENT());
-    }
+
+            int16_t textX = 4;
+
+            // Draw status circles for handshakes (WPA-SEC) and wardriving (WiGLE)
+            if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
+                // Single combined dot across both cracking services: best outcome wins
+                // (cracked > uploaded), else fall back to WPA-SEC's view. We do NOT mix
+                // pwncrack's negative states in: its status defaults to NOT_UPLOADED
+                // for every capture even when unkeyed, which would wrongly turn
+                // incomplete/invalid rows red. FILE INFO shows the per-service detail.
+                WpaSecStatus pcStatus = summaries[handshakeIndices_[i]].pwncrackStatus;
+                WpaSecStatus combined = wpaStatus;
+                if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
+                    combined = WpaSecStatus::CRACKED;
+                } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
+                    combined = WpaSecStatus::UPLOADED;
+                }
+
+                uint16_t circleColor;
+                switch (combined) {
+                    case WpaSecStatus::NOT_UPLOADED: circleColor = theme::ERROR();         break;  // Red
+                    case WpaSecStatus::UPLOADED:     circleColor = theme::WARNING();       break;  // Orange
+                    case WpaSecStatus::CRACKED:      circleColor = theme::SUCCESS();       break;  // Green
+                    case WpaSecStatus::INVALID:      circleColor = theme::TEXT_DISABLED(); break;  // Gray
+                    case WpaSecStatus::INCOMPLETE:   circleColor = 0xFFFF;                 break;  // White
+                    default:                         circleColor = theme::ERROR();
+                }
+                c.fillCircle(8, rowY + 6, 4, circleColor);  // single dot (original style)
+                textX = 18;  // Offset for circle
+            } else if (selectedCategory_ == CaptureCategory::WARDRIVING) {
+                WigleStatus wigleStatus = WigleService::getInstance().getStatus(fileName);
+                uint16_t circleColor = (wigleStatus == WigleStatus::UPLOADED)
+                                       ? theme::SUCCESS() : theme::ERROR();
+
+                c.fillCircle(8, rowY + 6, 4, circleColor);
+                textX = 18;
+            }
+
+            // Filename. BG_SELECTED() is a subtle band, so selected text keeps the normal colour
+            // (readable on the band) rather than the dark-on-bright inversion the ACCENT bar needed.
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(textX, rowY + 2);
+
+            char displayName[32];
+            int maxLen = (selectedCategory_ == CaptureCategory::HANDSHAKES) ? 24 : 28;
+            strncpy(displayName, fileName, maxLen);
+            displayName[maxLen] = '\0';
+            if ((int)strlen(fileName) > maxLen) {
+                strcat(displayName, "...");
+            }
+            c.print(displayName);
+
+            // Size on second line
+            c.setTextColor(theme::TEXT_SECONDARY());
+            c.setCursor(textX, rowY + 11);
+            c.print(formatSize(fileSize));
+
+            // Type badge moved to FILE INFO screen to avoid metadata loading in list
+        });
 }
 
 void CapturesScreen::drawDeleteConfirm(Canvas& canvas) {
@@ -1451,7 +1410,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
     const int16_t lineHeight = 14;
     
     size_t listSize = getListSize();
-    int sel = selection_;
+    int sel = fileList_.selectedIndex();
     if (sel < 0 || sel >= (int)listSize) return;
     
     // For HANDSHAKES, get data from registry; for others use files_

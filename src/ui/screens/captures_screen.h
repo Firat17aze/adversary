@@ -17,6 +17,8 @@
 #include "../components/toast_manager.h"
 #include "../components/footer_hints.h"
 #include "../components/action_menu.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "modules/network/wpasec_service.h"
 #include "modules/network/wigle_service.h"
 #include "utils/handshake_utils.h"
@@ -235,9 +237,10 @@ private:
     void startSync(bool selectedOnly);                   // enqueue + kick the first job
     void kickNextSync();                                 // chain the next job
     
-    // List state
-    int selection_;
-    int scrollOffset_;
+    // List state. The shared model owns selection + scroll window + wrap; drawFileList feeds it
+    // the live viewport each frame so the two can't drift (slice-0062). VISIBLE_FILES/ROW_HEIGHT
+    // only size the render rect; the model reports the derived row count back to the input logic.
+    ListScrollModel fileList_;
 };
 
 } // namespace adversary
