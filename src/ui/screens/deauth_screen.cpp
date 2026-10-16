@@ -16,8 +16,6 @@ DeauthScreen::DeauthScreen()
     , screenState_(DeauthScreenState::CONFIG)
     , hasTarget_(false)
     , targetChannel_(1)
-    , configSelection_(0)
-    , scrollOffset_(0)
     , targetType_(DeauthTargetType::ALL_CLIENTS)
     , reasonCode_(DeauthReason::DEAUTH_LEAVING)
     , packetCount_(100)
@@ -273,48 +271,31 @@ void DeauthScreen::drawConfig(Canvas& canvas)
         {"Start Attack", hasTarget_ ? ">" : "(no target)"}
     };
     
-    // Calculate visible area (account for footer)
+    // The shared component derives the visible-row count from the list rect (below the target
+    // block, down to the footer), keeps the selection on screen, and draws the unified thumb in
+    // place of the old ^/v markers; this callback paints one option row.
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
-    int maxVisibleItems = (footerY - y) / lineHeight;
-    if (maxVisibleItems < 1) maxVisibleItems = 1;
-    configVisibleItems_ = maxVisibleItems;  // single source of truth, read by handleInput
+    configList_.setItemCount(CONFIG_OPTION_COUNT);
+    ScrollableList::render(canvas, configList_, 0, y, canvas.width(), footerY - y, lineHeight,
+        [this, &options, lineHeight](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (selected) {
+                // Dim highlight when the footer has focus.
+                uint16_t highlightColor = footerHints_.hasFocus()
+                    ? theme::BG_SECONDARY()
+                    : theme::BG_SELECTED();
+                c.fillRect(0, rowY, c.width(), lineHeight, highlightColor);
+            }
 
-    // Draw visible config options with scroll offset
-    for (int i = scrollOffset_; i < CONFIG_OPTION_COUNT && (i - scrollOffset_) < maxVisibleItems; i++) {
-        bool selected = (i == configSelection_);
-        
-        if (selected) {
-            // Dim highlight when footer has focus
-            uint16_t highlightColor = footerHints_.hasFocus() 
-                ? theme::BG_SECONDARY() 
-                : theme::BG_SELECTED();
-            canvas.fillRect(0, y, canvas.width(), lineHeight, highlightColor);
-        }
-        
-        canvas.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-        canvas.setCursor(4, y + 2);
-        canvas.print(options[i].label);
-        
-        // Right-align value
-        int16_t valueWidth = strlen(options[i].value) * 6;
-        canvas.setCursor(canvas.width() - valueWidth - 4, y + 2);
-        canvas.print(options[i].value);
-        
-        y += lineHeight;
-    }
-    
-    // Draw scroll indicators if needed
-    if (scrollOffset_ > 0) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(canvas.width() - 12, HEADER_HEIGHT + 4);
-        canvas.print("^");
-    }
-    if (scrollOffset_ + maxVisibleItems < CONFIG_OPTION_COUNT) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(canvas.width() - 12, footerY - lineHeight);
-        canvas.print("v");
-    }
-    
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
+            c.setCursor(4, rowY + 2);
+            c.print(options[idx].label);
+
+            // Right-align value
+            int16_t valueWidth = strlen(options[idx].value) * 6;
+            c.setCursor(c.width() - valueWidth - 4, rowY + 2);
+            c.print(options[idx].value);
+        });
+
     drawFooter(canvas);
 #else
     (void)canvas;
@@ -529,28 +510,18 @@ bool DeauthScreen::handleInput(char key)
 void DeauthScreen::handleUp()
 {
     if (screenState_ == DeauthScreenState::CONFIG) {
-        if (configSelection_ > 0) {
-            configSelection_--;
-            // Adjust scroll if selection moves above visible area
-            if (configSelection_ < scrollOffset_) {
-                scrollOffset_ = configSelection_;
-            }
-            needsRedraw_ = true;
-        }
+        configList_.setItemCount(CONFIG_OPTION_COUNT);
+        configList_.moveUp();  // wraps to last; model keeps the selection on screen
+        needsRedraw_ = true;
     }
 }
 
 void DeauthScreen::handleDown()
 {
     if (screenState_ == DeauthScreenState::CONFIG) {
-        if (configSelection_ < CONFIG_OPTION_COUNT - 1) {
-            configSelection_++;
-            // Adjust scroll if selection moves below the rendered area
-            if (configSelection_ >= scrollOffset_ + configVisibleItems_) {
-                scrollOffset_ = configSelection_ - configVisibleItems_ + 1;
-            }
-            needsRedraw_ = true;
-        }
+        configList_.setItemCount(CONFIG_OPTION_COUNT);
+        configList_.moveDown();  // wraps to first; model keeps the selection on screen
+        needsRedraw_ = true;
     }
 }
 
@@ -559,14 +530,14 @@ void DeauthScreen::handleSelect()
     switch (screenState_) {
         case DeauthScreenState::CONFIG:
             // Toggle/modify selected option or start attack
-            if (configSelection_ == CONFIG_OPTION_COUNT - 1) {
+            if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
                 // Last option is "Start Attack"
                 if (hasTarget_) {
                     startAttack();
                 }
             } else {
                 // Toggle options
-                switch (configSelection_) {
+                switch (configList_.selectedIndex()) {
                     case 0:  // Target type
                         if (targetType_ == DeauthTargetType::ALL_CLIENTS) {
                             targetType_ = DeauthTargetType::SINGLE_CLIENT;
