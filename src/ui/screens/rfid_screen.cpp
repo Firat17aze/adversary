@@ -371,7 +371,7 @@ void RfidScreen::drawAuditPrompt(Canvas& canvas) {
     // Option 0: Read Block Data (selectable)
     bool opt0Selected = (m_promptSelection == 0);
     if (opt0Selected) {
-        canvas.fillRect(0, y - 1, screenW, rowH, theme::ACCENT());
+        canvas.fillRect(0, y - 1, screenW, rowH, theme::BG_SELECTED());
         canvas.setTextColor(theme::TEXT_PRIMARY());
     } else {
         canvas.setTextColor(theme::TEXT_SECONDARY());
@@ -1417,7 +1417,7 @@ void RfidScreen::drawWritePrompt(Canvas& canvas) {
     // Option 0: UID (block 0) opt-in.
     bool uidRowSelected = (m_writePromptSelection == 0);
     if (uidRowSelected) {
-        canvas.fillRect(0, y - 1, screenW, rowH, theme::ACCENT());
+        canvas.fillRect(0, y - 1, screenW, rowH, theme::BG_SELECTED());
         canvas.setTextColor(theme::TEXT_PRIMARY());
     } else {
         canvas.setTextColor(theme::TEXT_SECONDARY());
