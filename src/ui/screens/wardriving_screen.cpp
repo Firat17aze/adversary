@@ -25,8 +25,6 @@ WardrivingScreen::WardrivingScreen()
     , lastUpdateMs_(0)
     , logWriteIndex_(0)
     , logCount_(0)
-    , logScroll_(0)
-    , logSelection_(0)
 {
     // Initialize network log
     for (size_t i = 0; i < MAX_LOG_NETWORKS; i++) {
@@ -232,8 +230,8 @@ bool WardrivingScreen::handleInput(char key) {
             } else if (key == 'l' || key == 'L') {  // Network log
                 returnState_ = WardrivingState::SCANNING;
                 state_ = WardrivingState::NETWORK_LOG;
-                logScroll_ = 0;
-                logSelection_ = 0;
+                logList_.setItemCount((int)logCount_);
+                logList_.setSelectedIndex(0);
                 return true;
             }
             break;
@@ -252,31 +250,20 @@ bool WardrivingScreen::handleInput(char key) {
             } else if (key == 'l' || key == 'L') {  // Network log
                 returnState_ = WardrivingState::PAUSED;
                 state_ = WardrivingState::NETWORK_LOG;
-                logScroll_ = 0;
-                logSelection_ = 0;
+                logList_.setItemCount((int)logCount_);
+                logList_.setSelectedIndex(0);
                 return true;
             }
             break;
             
         case WardrivingState::NETWORK_LOG:
-            // Navigation
+            // Navigation — the shared model wraps at the ends and keeps the selection on screen
+            // (the renderer feeds it the live row count each frame).
             if (key == '.') {  // Down (Cardputer keyboard)
-                if (logSelection_ < (int)logCount_ - 1) {
-                    logSelection_++;
-                    // Scroll if needed
-                    if (logSelection_ - logScroll_ >= logVisibleItems_) {
-                        logScroll_++;
-                    }
-                }
+                logList_.moveDown();
                 return true;
             } else if (key == ';') {  // Up (Cardputer keyboard)
-                if (logSelection_ > 0) {
-                    logSelection_--;
-                    // Scroll if needed
-                    if (logSelection_ < logScroll_) {
-                        logScroll_--;
-                    }
-                }
+                logList_.moveUp();
                 return true;
             } else if (key == '`' || key == 27) {  // Back
                 state_ = returnState_;
@@ -348,9 +335,13 @@ uint16_t WardrivingScreen::getRSSIColor(int8_t rssi) {
 
 void WardrivingScreen::render(Canvas& canvas) {
     if (!visible_) return;
-    
+
     canvas.fillScreen(theme::BG_PRIMARY());
-    
+
+    // Only the network-log view shows a right-side position count; clear it every frame so the
+    // sticky footer field can't bleed the stale "n/n" into the scanning/paused/idle screens.
+    footerHints_.setRightContent(nullptr);
+
     switch (state_) {
         case WardrivingState::IDLE:
             drawIdle(canvas);
@@ -629,9 +620,9 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     const int16_t itemHeight = 14;
     const int16_t listY = ui::STATUS_BAR_HEIGHT + 1;                         // sit just under the bar
     const int16_t listHeight = canvas.height() - listY - ui::FOOTER_HEIGHT;  // ...down to the footer
-    const int16_t visibleItems = listHeight / itemHeight;
-    logVisibleItems_ = visibleItems;  // single source of truth, read back by handleInput
-    
+
+    logList_.setItemCount((int)logCount_);
+
     if (logCount_ == 0) {
         canvas.setTextColor(theme::TEXT_DISABLED());
         canvas.setTextSize(1);
@@ -643,55 +634,48 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
         footerHints_.render(canvas);
         return;
     }
-    
+
     canvas.setTextSize(1);
-    
-    for (int i = 0; i < visibleItems && (logScroll_ + i) < (int)logCount_; i++) {
-        int idx = logScroll_ + i;
-        
-        int bufferIdx = (logWriteIndex_ - 1 - idx + MAX_LOG_NETWORKS) % MAX_LOG_NETWORKS;
-        const auto& net = networkLog_[bufferIdx];
-        
-        if (!net.valid) continue;
-        
-        int16_t y = listY + (i * itemHeight);
-        bool isSelected = (idx == logSelection_);
-        
-        if (isSelected) {
-            canvas.fillRect(0, y - 1, canvas.width(), itemHeight, theme::ACCENT());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        
-        canvas.setCursor(4, y + 2);
-        char ssid[17];
-        strncpy(ssid, net.ssid, 16);
-        ssid[16] = '\0';
-        canvas.print(ssid);
-        
-        canvas.setCursor(canvas.width() - 90, y + 2);
-        canvas.printf("Ch%d", net.channel);
-        
-        canvas.setCursor(canvas.width() - 60, y + 2);
-        canvas.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
-        
-        uint16_t rssiColor = getRSSIColor(net.rssi);
-        canvas.setTextColor(rssiColor);
-        canvas.setCursor(canvas.width() - 30, y + 2);
-        canvas.printf("%d", net.rssi);
-    }
-    
-    if ((int)logCount_ > visibleItems) {
-        int16_t scrollBarHeight = (visibleItems * listHeight) / logCount_;
-        int16_t scrollBarY = listY + (logScroll_ * listHeight) / logCount_;
-        canvas.fillRect(canvas.width() - 3, scrollBarY, 3, scrollBarHeight, theme::ACCENT());
-    }
-    
+
+    // The shared component derives the visible-row count from listHeight/itemHeight, keeps the
+    // selection on screen, and draws the unified scrollbar; this callback only paints one row.
+    ScrollableList::render(canvas, logList_, 0, listY, canvas.width(), listHeight, itemHeight,
+        [this, itemHeight](Canvas& c, int idx, int16_t y, bool isSelected) {
+            int bufferIdx = (logWriteIndex_ - 1 - idx + MAX_LOG_NETWORKS) % MAX_LOG_NETWORKS;
+            const auto& net = networkLog_[bufferIdx];
+            if (!net.valid) return;
+
+            if (isSelected) {
+                // BG_SELECTED is the app-wide selected-row style (scanner, deauth, ble/radio/…);
+                // wardriving used to draw a bright ACCENT bar, the lone outlier.
+                c.fillRect(0, y - 1, c.width(), itemHeight, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+
+            c.setCursor(4, y + 2);
+            char ssid[17];
+            strncpy(ssid, net.ssid, 16);
+            ssid[16] = '\0';
+            c.print(ssid);
+
+            c.setCursor(c.width() - 90, y + 2);
+            c.printf("Ch%d", net.channel);
+
+            c.setCursor(c.width() - 60, y + 2);
+            c.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
+
+            uint16_t rssiColor = getRSSIColor(net.rssi);
+            c.setTextColor(rssiColor);
+            c.setCursor(c.width() - 30, y + 2);
+            c.printf("%d", net.rssi);
+        });
+
     char footerLeft[32];
-    snprintf(footerLeft, sizeof(footerLeft), "%d/%d", logScroll_ + 1, (int)logCount_);
+    snprintf(footerLeft, sizeof(footerLeft), "%d/%d", logList_.selectedIndex() + 1, (int)logCount_);
     footerHints_.setRightContent(footerLeft);
-    
+
     footerHints_.setHints({
         {'`', "Back", true}
     });

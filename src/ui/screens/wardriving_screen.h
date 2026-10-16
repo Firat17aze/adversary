@@ -15,6 +15,8 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
 #include "ui/components/action_menu.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "screen_interface.h"
 #include <Arduino.h>
 
@@ -110,14 +112,10 @@ private:
     size_t logWriteIndex_;
     size_t logCount_;
     
-    // Scroll state for network log
-    int logScroll_;
-    int logSelection_;
-    // Rows the log list can show, derived from the live layout in drawNetworkLog and
-    // read back by handleInput so the scroll threshold can never drift from what is
-    // actually rendered (the prior hard-coded 7 vs a rendered 6 pushed the selection
-    // off-screen). Seeded with the current layout's value for input before first paint.
-    int logVisibleItems_ = 7;
+    // Selection + scroll window for the network log. The shared model keeps the selection on
+    // screen from the viewport the renderer derives each frame, so the off-screen/premature
+    // scroll bugs can't recur here, and it wraps at the ends (slice-0062).
+    ListScrollModel logList_;
     
     // UI Components
     ui::FooterHints footerHints_;
