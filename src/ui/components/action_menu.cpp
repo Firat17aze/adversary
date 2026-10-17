@@ -9,13 +9,13 @@ namespace adversary {
 namespace ui {
 
 ActionMenu::ActionMenu()
-    : title_("Select Action")
-    , subtitle_(nullptr)
-    , callback_(nullptr)
+    : callback_(nullptr)
     , dismissCallback_(nullptr)
     , selectedIndex_(0)
     , visible_(false)
 {
+    copyText(title_, "Select Action");
+    copyText(subtitle_, nullptr);
 }
 
 void ActionMenu::addItem(char shortcut, const char* label, bool enabled) {

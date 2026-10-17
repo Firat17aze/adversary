@@ -45,13 +45,17 @@ public:
     
     /**
      * @brief Set the menu title (main heading)
+     *
+     * The text is copied into the menu's own buffer, so callers may pass a
+     * temporary (e.g. a std::string's c_str()) without the pointer dangling.
+     * Titles longer than TEXT_MAX-1 are truncated.
      */
-    void setTitle(const char* title) { title_ = title; }
-    
+    void setTitle(const char* title) { copyText(title_, title); }
+
     /**
-     * @brief Set the menu subtitle (e.g., target details)
+     * @brief Set the menu subtitle (e.g., target details); nullptr clears it.
      */
-    void setSubtitle(const char* subtitle) { subtitle_ = subtitle; }
+    void setSubtitle(const char* subtitle) { copyText(subtitle_, subtitle); }
     
     /**
      * @brief Clear all menu items
@@ -117,15 +121,25 @@ public:
     void selectCurrent();
 
 private:
-    const char* title_;
-    const char* subtitle_;
+    // Owned, fixed-capacity text: the menu copies titles in rather than borrowing the
+    // caller's pointer, so a title built from a temporary can't dangle (char[] over String
+    // to avoid heap fragmentation on this chip, per CLAUDE.md).
+    static constexpr size_t TEXT_MAX = 48;
+    static void copyText(char (&dst)[TEXT_MAX], const char* src) {
+        if (!src) { dst[0] = '\0'; return; }
+        strncpy(dst, src, TEXT_MAX - 1);
+        dst[TEXT_MAX - 1] = '\0';
+    }
+
+    char title_[TEXT_MAX];
+    char subtitle_[TEXT_MAX];
     std::vector<ActionMenuItem> items_;
     ActionCallback callback_;
     std::function<void()> dismissCallback_;
-    
+
     int selectedIndex_;
     bool visible_;
-    
+
     // Layout constants
     static constexpr int16_t MENU_PADDING = 8;
     static constexpr int16_t ITEM_HEIGHT = 16;
@@ -146,8 +160,8 @@ void ActionMenu::render(Canvas& canvas) {
     
     // Calculate menu dimensions
     int16_t menuWidth = screenWidth - 40;  // 20px margin each side
-    int16_t contentHeight = TITLE_HEIGHT + 
-                            (subtitle_ ? SUBTITLE_HEIGHT : 0) + 
+    int16_t contentHeight = TITLE_HEIGHT +
+                            (subtitle_[0] ? SUBTITLE_HEIGHT : 0) +
                             (items_.size() * ITEM_HEIGHT) + 
                             FOOTER_HEIGHT + 
                             (MENU_PADDING * 2);
@@ -181,7 +195,7 @@ void ActionMenu::render(Canvas& canvas) {
     y += TITLE_HEIGHT;
     
     // Draw subtitle if present
-    if (subtitle_ && strlen(subtitle_) > 0) {
+    if (subtitle_[0]) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         int16_t subWidth = strlen(subtitle_) * 6;
         int16_t subX = menuX + (menuWidth - subWidth) / 2;
