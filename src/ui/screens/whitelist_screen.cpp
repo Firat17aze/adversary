@@ -16,8 +16,6 @@ WhitelistScreen::WhitelistScreen()
     , needsRedraw_(true)
     , shouldExit_(false)
     , state_(WhitelistScreenState::LIST)
-    , selectedIndex_(0)
-    , scrollOffset_(0)
     , deleteConfirmYes_(false)
 {
 }
@@ -53,19 +51,18 @@ void WhitelistScreen::loadWhitelist() {
         entries_.push_back(entry);
     }
     
-    // Reset selection if needed
-    if (selectedIndex_ >= static_cast<int16_t>(entries_.size())) {
-        selectedIndex_ = entries_.empty() ? 0 : entries_.size() - 1;
-    }
+    // The model clamps the selection onto the (possibly shrunk) list.
+    entryList_.setItemCount((int)entries_.size());
 }
 
 void WhitelistScreen::deleteSelectedEntry() {
-    if (selectedIndex_ < 0 || selectedIndex_ >= static_cast<int16_t>(entries_.size())) {
+    int selected = entryList_.selectedIndex();
+    if (selected < 0 || selected >= static_cast<int16_t>(entries_.size())) {
         return;
     }
-    
+
     // Remove from SettingsManager
-    SettingsManager::getInstance().removeFromWhitelist(selectedIndex_);
+    SettingsManager::getInstance().removeFromWhitelist(selected);
     SettingsManager::getInstance().saveWhitelist();
     
     // Reload list
@@ -95,26 +92,18 @@ bool WhitelistScreen::handleInput(char key) {
                     return true;
                     
                 case ';':  // Up
-                    if (!entries_.empty()) {
-                        selectedIndex_--;
-                        if (selectedIndex_ < 0) {
-                            selectedIndex_ = entries_.size() - 1;
-                        }
-                    }
+                    entryList_.setItemCount((int)entries_.size());
+                    entryList_.moveUp();  // wraps to last; model keeps the selection on screen
                     return true;
-                    
+
                 case '.':  // Down
-                    if (!entries_.empty()) {
-                        selectedIndex_++;
-                        if (selectedIndex_ >= static_cast<int16_t>(entries_.size())) {
-                            selectedIndex_ = 0;
-                        }
-                    }
+                    entryList_.setItemCount((int)entries_.size());
+                    entryList_.moveDown();  // wraps to first; model keeps the selection on screen
                     return true;
-                    
+
                 case 'd':
                 case 'D':
-                    if (!entries_.empty() && selectedIndex_ < static_cast<int16_t>(entries_.size())) {
+                    if (!entries_.empty() && entryList_.selectedIndex() < static_cast<int16_t>(entries_.size())) {
                         state_ = WhitelistScreenState::DELETE_CONFIRM;
                         deleteConfirmYes_ = false;
                     }
@@ -189,65 +178,56 @@ void WhitelistScreen::drawFooter(Canvas& canvas) {
 }
 
 void WhitelistScreen::drawList(Canvas& canvas) {
-    int16_t contentHeight = canvas.height() - HEADER_HEIGHT - ui::FOOTER_HEIGHT;
-    int16_t visibleRows = contentHeight / ROW_HEIGHT;
     int16_t y = HEADER_HEIGHT + 4;
-    
+
     if (entries_.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(4, y);
         canvas.print("(no entries)");
         return;
     }
-    
-    // Adjust scroll to keep selection visible
-    if (selectedIndex_ < scrollOffset_) {
-        scrollOffset_ = selectedIndex_;
-    } else if (selectedIndex_ >= scrollOffset_ + visibleRows) {
-        scrollOffset_ = selectedIndex_ - visibleRows + 1;
-    }
-    
+
     canvas.setTextSize(1);
-    
-    for (int16_t i = 0; i < visibleRows && (scrollOffset_ + i) < static_cast<int16_t>(entries_.size()); i++) {
-        int16_t idx = scrollOffset_ + i;
-        const auto& entry = entries_[idx];
-        bool selected = (idx == selectedIndex_);
-        
-        // Draw selection highlight
-        if (selected) {
-            canvas.fillRect(0, y - 1, canvas.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        
-        canvas.setCursor(8, y);
-        
-        // Display SSID first, then BSSID
-        char displayText[64] = {0};
-        if (entry.hasSsid && strlen(entry.ssid) > 0) {
-            snprintf(displayText, sizeof(displayText), "%s", entry.ssid);
-            if (entry.hasBssid) {
-                // Append shortened BSSID
-                char bssidStr[20];
-                snprintf(bssidStr, sizeof(bssidStr), " [%02X:%02X:%02X]",
-                         entry.bssid[0], entry.bssid[1], entry.bssid[2]);
-                strncat(displayText, bssidStr, sizeof(displayText) - strlen(displayText) - 1);
+
+    // The shared component derives the visible-row count from the list rect (header to footer),
+    // keeps the selection on screen, and draws the unified thumb; this callback paints one row.
+    int16_t listHeight = canvas.height() - y - ui::FOOTER_HEIGHT;
+    entryList_.setItemCount((int)entries_.size());
+    ScrollableList::render(canvas, entryList_, 0, y, canvas.width(), listHeight, ROW_HEIGHT,
+        [this](Canvas& c, int idx, int16_t rowY, bool selected) {
+            const auto& entry = entries_[idx];
+            if (selected) {
+                c.fillRect(0, rowY, c.width(), ROW_HEIGHT, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
             }
-        } else if (entry.hasBssid) {
-            utils::formatMacBytes(entry.bssid, displayText, sizeof(displayText));
-        } else {
-            snprintf(displayText, sizeof(displayText), "(invalid entry)");
-        }
-        
-        canvas.print(displayText);
-        y += ROW_HEIGHT;
-    }
-    
+
+            c.setCursor(8, rowY + 1);
+
+            // Display SSID first, then BSSID
+            char displayText[64] = {0};
+            if (entry.hasSsid && strlen(entry.ssid) > 0) {
+                snprintf(displayText, sizeof(displayText), "%s", entry.ssid);
+                if (entry.hasBssid) {
+                    // Append shortened BSSID
+                    char bssidStr[20];
+                    snprintf(bssidStr, sizeof(bssidStr), " [%02X:%02X:%02X]",
+                             entry.bssid[0], entry.bssid[1], entry.bssid[2]);
+                    strncat(displayText, bssidStr, sizeof(displayText) - strlen(displayText) - 1);
+                }
+            } else if (entry.hasBssid) {
+                utils::formatMacBytes(entry.bssid, displayText, sizeof(displayText));
+            } else {
+                snprintf(displayText, sizeof(displayText), "(invalid entry)");
+            }
+
+            c.print(displayText);
+        });
+
     // Draw entry count on right
     static char countBuf[16];
-    snprintf(countBuf, sizeof(countBuf), "%d/%d", selectedIndex_ + 1, (int)entries_.size());
+    snprintf(countBuf, sizeof(countBuf), "%d/%d", entryList_.selectedIndex() + 1, (int)entries_.size());
     footerHints_.setRightContent(countBuf);
 }
 
@@ -259,8 +239,9 @@ void WhitelistScreen::drawDeleteConfirm(Canvas& canvas) {
     canvas.setTextColor(theme::TEXT_PRIMARY());
     
     // Show entry to delete
-    if (selectedIndex_ >= 0 && selectedIndex_ < static_cast<int16_t>(entries_.size())) {
-        const auto& entry = entries_[selectedIndex_];
+    int selected = entryList_.selectedIndex();
+    if (selected >= 0 && selected < static_cast<int16_t>(entries_.size())) {
+        const auto& entry = entries_[selected];
         
         canvas.setCursor(8, y);
         canvas.print("Remove from whitelist:");

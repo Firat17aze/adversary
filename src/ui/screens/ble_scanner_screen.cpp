@@ -20,8 +20,6 @@ namespace adversary {
 
 BleScannerScreen::BleScannerScreen()
     : m_scanner(BLEScanner::getInstance())
-    , m_selectedIndex(0)
-    , m_scrollOffset(0)
     , m_active(false)
     , m_shouldExit(false)
     , m_needsRedraw(true)
@@ -37,9 +35,8 @@ void BleScannerScreen::show() {
     m_active = true;
     m_shouldExit = false;
     m_needsRedraw = true;
-    m_selectedIndex = 0;
-    m_scrollOffset = 0;
-    
+    m_list.setItemCount(0);  // Reset selection + scroll to the top
+
     // Initialize footer hints
     footerHints_.setHints({
         {'\n', "Target", true},
@@ -158,8 +155,8 @@ void BleScannerScreen::drawHeader(Canvas& canvas) {
 
 void BleScannerScreen::drawList(Canvas& canvas) {
     int startY = config::STATUS_BAR_HEIGHT + 5;
-    int itemHeight = 22;
-    
+    const int16_t itemHeight = 22;
+
     if (m_deviceList.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(20, startY + 40);
@@ -167,58 +164,60 @@ void BleScannerScreen::drawList(Canvas& canvas) {
         return;
     }
 
-    for (int i = 0; i < ITEMS_PER_PAGE && (i + m_scrollOffset) < m_deviceList.size(); ++i) {
-        int idx = i + m_scrollOffset;
-        const auto& dev = m_deviceList[idx];
-        int y = startY + (i * itemHeight);
-        
-        // Highlight selection - only if footer doesn't have focus
-        bool showAsSelected = (idx == m_selectedIndex) && !footerHints_.hasFocus();
-        
-        if (showAsSelected) {
-            canvas.fillRect(0, y, config::SCREEN_WIDTH, itemHeight, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_INVERSE());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        
-        // Signal strength bar (simple)
-        int rssiX = 5;
-        int barW = map(constrain(dev.rssi, -100, -30), -100, -30, 2, 10);
-        canvas.fillRect(rssiX, y + 5, barW, 10, idx == m_selectedIndex ? theme::TEXT_INVERSE() : theme::ACCENT());
-        
-        // Name and MAC
-        canvas.setCursor(20, y + 2);
-        canvas.print(dev.name.c_str());
-        
-        // Fast Pair Badge
-        if (dev.isFastPair) {
-            int nameW = strlen(dev.name.c_str()) * 6;
-            int badgeX = 20 + nameW + 8;
-            canvas.fillRoundRect(badgeX, y + 2, 20, 9, 2, theme::SUCCESS());
-            canvas.setTextColor(theme::BG_PRIMARY());
-            canvas.setCursor(badgeX + 2, y + 3);
-            canvas.print("FP");
-        }
-        
-        canvas.setTextSize(1);
-        canvas.setTextColor(idx == m_selectedIndex ? theme::TEXT_INVERSE() : theme::TEXT_SECONDARY());
-        canvas.setCursor(20, y + 12);
-        canvas.print(ble::addressToString(dev.address).c_str());
-        
-        // RSSI value
-        char rssiBuf[8];
-        snprintf(rssiBuf, sizeof(rssiBuf), "%d", dev.rssi);
-        canvas.setCursor(config::SCREEN_WIDTH - 50, y + 2);
-        canvas.print(rssiBuf);
-        
-        // Special tags
-        if (dev.isFastPair) {
-            canvas.setTextColor(theme::SUCCESS());
-            canvas.setCursor(config::SCREEN_WIDTH - 30, y + 12);
-            canvas.print("[FP]");
-        }
-    }
+    // The shared component derives the visible-row count from the list rect, keeps the selection
+    // on screen, and draws the unified thumb; this callback paints one device row. The render rect
+    // is sized to ITEMS_PER_PAGE so the on-screen row count is unchanged.
+    m_list.setItemCount((int)m_deviceList.size());
+    ScrollableList::render(canvas, m_list, 0, startY, config::SCREEN_WIDTH, ITEMS_PER_PAGE * itemHeight,
+        itemHeight, [this, itemHeight](Canvas& c, int idx, int16_t y, bool selected) {
+            const auto& dev = m_deviceList[idx];
+
+            // Highlight selection - only if footer doesn't have focus
+            bool showAsSelected = selected && !footerHints_.hasFocus();
+            if (showAsSelected) {
+                c.fillRect(0, y, config::SCREEN_WIDTH, itemHeight, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_INVERSE());
+            } else {
+                c.setTextColor(theme::TEXT_PRIMARY());
+            }
+
+            // Signal strength bar (simple)
+            int rssiX = 5;
+            int barW = map(constrain(dev.rssi, -100, -30), -100, -30, 2, 10);
+            c.fillRect(rssiX, y + 5, barW, 10, selected ? theme::TEXT_INVERSE() : theme::ACCENT());
+
+            // Name and MAC
+            c.setCursor(20, y + 2);
+            c.print(dev.name.c_str());
+
+            // Fast Pair Badge
+            if (dev.isFastPair) {
+                int nameW = strlen(dev.name.c_str()) * 6;
+                int badgeX = 20 + nameW + 8;
+                c.fillRoundRect(badgeX, y + 2, 20, 9, 2, theme::SUCCESS());
+                c.setTextColor(theme::BG_PRIMARY());
+                c.setCursor(badgeX + 2, y + 3);
+                c.print("FP");
+            }
+
+            c.setTextSize(1);
+            c.setTextColor(selected ? theme::TEXT_INVERSE() : theme::TEXT_SECONDARY());
+            c.setCursor(20, y + 12);
+            c.print(ble::addressToString(dev.address).c_str());
+
+            // RSSI value
+            char rssiBuf[8];
+            snprintf(rssiBuf, sizeof(rssiBuf), "%d", dev.rssi);
+            c.setCursor(config::SCREEN_WIDTH - 50, y + 2);
+            c.print(rssiBuf);
+
+            // Special tags
+            if (dev.isFastPair) {
+                c.setTextColor(theme::SUCCESS());
+                c.setCursor(config::SCREEN_WIDTH - 30, y + 12);
+                c.print("[FP]");
+            }
+        });
 }
 
 void BleScannerScreen::drawFooter(Canvas& canvas) {
@@ -249,45 +248,32 @@ bool BleScannerScreen::handleInput(char key) {
 
     switch (key) {
         case ';': // UP (wraps to last)
-        case 'k': {
-            int n = (int)m_deviceList.size();
-            if (n > 0) {
-                m_selectedIndex = (m_selectedIndex - 1 + n) % n;
-                if (m_selectedIndex < m_scrollOffset) m_scrollOffset = m_selectedIndex;
-                else if (m_selectedIndex >= m_scrollOffset + ITEMS_PER_PAGE)
-                    m_scrollOffset = m_selectedIndex - ITEMS_PER_PAGE + 1;
-                m_needsRedraw = true;
-            }
+        case 'k':
+            m_list.setItemCount((int)m_deviceList.size());
+            m_list.moveUp();  // wraps to last; model keeps the selection on screen
+            m_needsRedraw = true;
             return true;
-        }
 
         case '.': // DOWN (wraps to first)
-        case 'j': {
-            int n = (int)m_deviceList.size();
-            if (n > 0) {
-                m_selectedIndex = (m_selectedIndex + 1) % n;
-                if (m_selectedIndex >= m_scrollOffset + ITEMS_PER_PAGE)
-                    m_scrollOffset = m_selectedIndex - ITEMS_PER_PAGE + 1;
-                else if (m_selectedIndex < m_scrollOffset) m_scrollOffset = m_selectedIndex;
-                m_needsRedraw = true;
-            }
+        case 'j':
+            m_list.setItemCount((int)m_deviceList.size());
+            m_list.moveDown();  // wraps to first; model keeps the selection on screen
+            m_needsRedraw = true;
             return true;
-        }
-            
+
         case '\n': // ENTER - Open Action Menu
-            if (!m_deviceList.empty() && m_selectedIndex < (int)m_deviceList.size()) {
-                m_contextDevice = m_deviceList[m_selectedIndex];
+            if (!m_deviceList.empty() && m_list.selectedIndex() < (int)m_deviceList.size()) {
+                m_contextDevice = m_deviceList[m_list.selectedIndex()];
                 setupActionMenu(m_contextDevice);
                 actionMenu_.show();
                 m_needsRedraw = true;
             }
             return true;
-            
+
         case 'c': // Clear
             m_scanner.clearDevices();
             m_deviceList.clear();
-            m_selectedIndex = 0;
-            m_scrollOffset = 0;
+            m_list.setItemCount(0);
             m_needsRedraw = true;
             return true;
             

@@ -8,6 +8,8 @@
 #include "ui/screens/screen_interface.h"
 #include "ui/components/footer_hints.h"
 #include "ui/components/action_menu.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "modules/ble/ble_scanner.h"
 #include <vector>
 
@@ -44,8 +46,10 @@ private:
     ui::ActionMenu actionMenu_;
     std::vector<BLEDeviceInfo> m_deviceList;
     BLEDeviceInfo m_contextDevice;
-    int m_selectedIndex;
-    int m_scrollOffset;
+    // The shared model owns selection + scroll window + wrap; drawList feeds it the live
+    // viewport each frame so the two can't drift (slice-0062). ITEMS_PER_PAGE only sizes the
+    // render rect.
+    ListScrollModel m_list;
     bool m_active;
     bool m_shouldExit;
     bool m_needsRedraw;

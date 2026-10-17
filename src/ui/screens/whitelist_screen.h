@@ -14,6 +14,8 @@
 #include "../theme.h"
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "modules/storage/settings_manager.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
@@ -78,10 +80,10 @@ private:
     bool shouldExit_;
     WhitelistScreenState state_;
     
-    // List state
+    // List state. The shared model owns selection + scroll window + wrap; drawList feeds it the
+    // live viewport each frame so the two can't drift (slice-0062).
     std::vector<WhitelistEntry> entries_;
-    int16_t selectedIndex_;
-    int16_t scrollOffset_;
+    ListScrollModel entryList_;
     
     // Delete confirm state
     bool deleteConfirmYes_;

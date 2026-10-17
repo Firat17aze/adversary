@@ -18,8 +18,6 @@ namespace adversary {
 
 BleSpamScreen::BleSpamScreen()
     : m_state(State::CONFIG)
-    , m_configSelection(0)
-    , m_configScrollOffset(0)
     , m_active(false)
     , m_shouldExit(false)
     , m_needsRedraw(true)
@@ -30,8 +28,7 @@ void BleSpamScreen::show() {
     m_active = true;
     m_shouldExit = false;
     m_state = State::CONFIG;
-    m_configSelection = 0;
-    m_configScrollOffset = 0;
+    m_configList.setItemCount(0);  // Reset selection + scroll to the top
     m_config = BleSpamConfig(); // Reset to defaults
     
     footerHints_.setHints({
@@ -71,66 +68,39 @@ void BleSpamScreen::render(Canvas& canvas) {
 }
 
 void BleSpamScreen::drawConfig(Canvas& canvas) {
-    int16_t y = FIRST_LINE_Y;
-    int16_t screenWidth = canvas.width();
-    
-    // Calculate visible items
-    const int16_t footerHeight = ui::FOOTER_HEIGHT; 
+    const int16_t footerHeight = ui::FOOTER_HEIGHT;
     const int16_t availableHeight = config::SCREEN_HEIGHT - FIRST_LINE_Y - footerHeight - 4;
-    const int maxVisible = availableHeight / LINE_HEIGHT;
-    
-    // Update scroll offset
-    if (m_configSelection >= m_configScrollOffset + maxVisible) {
-        m_configScrollOffset = m_configSelection - maxVisible + 1;
-    } else if (m_configSelection < m_configScrollOffset) {
-        m_configScrollOffset = m_configSelection;
-    }
-
-    auto drawOption = [&](const char* label, const char* value, bool selected) {
-        if (selected) {
-            canvas.fillRect(0, y - 2, screenWidth, LINE_HEIGHT, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        canvas.setCursor(MARGIN_LEFT, y);
-        canvas.print(label);
-        if (value) {
-            canvas.setCursor(80, y);
-            canvas.print(value);
-        }
-        y += LINE_HEIGHT;
-    };
-
-    // Draw scroll indicator if needed
-    if (m_configScrollOffset > 0) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, FIRST_LINE_Y - 2);
-        canvas.print("^");
-    }
 
     const char* optionLabels[] = {"Provider:", "Prompt:", "Intensity:", ">> START <<"};
-    
     const char* providers[] = {"Apple", "Android", "Windows", "Samsung", "Carousel"};
     const char* prompts[] = {"Pairing", "Action", "Battery", "Link"};
     char intStr[8];
     sprintf(intStr, "%dx", m_config.intensity);
 
-    for (int i = m_configScrollOffset; i < CONFIG_OPTION_COUNT && i < m_configScrollOffset + maxVisible; i++) {
-        const char* val = nullptr;
-        if (i == 0) val = providers[(int)m_config.provider];
-        else if (i == 1) val = prompts[(int)m_config.prompt];
-        else if (i == 2) val = intStr;
-        
-        drawOption(optionLabels[i], val, i == m_configSelection);
-    }
+    // The shared component derives the visible-row count from the list rect, keeps the selection
+    // on screen, and draws the unified thumb in place of the old ^/v markers; this callback paints
+    // one config row.
+    m_configList.setItemCount(CONFIG_OPTION_COUNT);
+    ScrollableList::render(canvas, m_configList, 0, FIRST_LINE_Y, canvas.width(), availableHeight,
+        LINE_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (selected) {
+                c.fillRect(0, rowY, c.width(), LINE_HEIGHT, theme::BG_SECONDARY());
+                c.setTextColor(theme::ACCENT());
+            } else {
+                c.setTextColor(theme::TEXT_PRIMARY());
+            }
+            c.setCursor(MARGIN_LEFT, rowY + 2);
+            c.print(optionLabels[idx]);
 
-    // Draw scroll down indicator
-    if (m_configScrollOffset + maxVisible < CONFIG_OPTION_COUNT) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, y - LINE_HEIGHT + 2);
-        canvas.print("v");
-    }
+            const char* val = nullptr;
+            if (idx == 0) val = providers[(int)m_config.provider];
+            else if (idx == 1) val = prompts[(int)m_config.prompt];
+            else if (idx == 2) val = intStr;
+            if (val) {
+                c.setCursor(80, rowY + 2);
+                c.print(val);
+            }
+        });
 }
 
 void BleSpamScreen::drawAttack(Canvas& canvas) {
@@ -212,42 +182,40 @@ bool BleSpamScreen::handleInput(char key) {
     if (m_state == State::CONFIG) {
         switch (key) {
             case ';': // Nav UP
-                if (m_configSelection > 0) {
-                    m_configSelection--;
-                    m_needsRedraw = true;
-                }
+                m_configList.setItemCount(CONFIG_OPTION_COUNT);
+                m_configList.moveUp();  // wraps to last; model keeps the selection on screen
+                m_needsRedraw = true;
                 return true;
             case '.': // Nav DOWN
-                if (m_configSelection < CONFIG_OPTION_COUNT - 1) {
-                    m_configSelection++;
-                    m_needsRedraw = true;
-                }
+                m_configList.setItemCount(CONFIG_OPTION_COUNT);
+                m_configList.moveDown();  // wraps to first; model keeps the selection on screen
+                m_needsRedraw = true;
                 return true;
             case ',': // Toggle/Edit PREV
             case '<':
-                if (m_configSelection == 0) {
+                if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)((int)m_config.provider == 0 ? 4 : (int)m_config.provider - 1);
-                } else if (m_configSelection == 1) {
+                } else if (m_configList.selectedIndex() == 1) {
                     m_config.prompt = (BleSpamPrompt)((int)m_config.prompt == 0 ? 3 : (int)m_config.prompt - 1);
-                } else if (m_configSelection == 2) {
+                } else if (m_configList.selectedIndex() == 2) {
                     if (m_config.intensity > 1) m_config.intensity--;
                 }
                 m_needsRedraw = true;
                 return true;
             case '/': // Toggle/Edit NEXT
             case '>':
-                if (m_configSelection == 0) {
+                if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)(((int)m_config.provider + 1) % 5);
-                } else if (m_configSelection == 1) {
+                } else if (m_configList.selectedIndex() == 1) {
                     m_config.prompt = (BleSpamPrompt)(((int)m_config.prompt + 1) % 4);
-                } else if (m_configSelection == 2) {
+                } else if (m_configList.selectedIndex() == 2) {
                     if (m_config.intensity < 10) m_config.intensity++;
                 }
                 m_needsRedraw = true;
                 return true;
             case '\n':
             case '\r':
-                if (m_configSelection == CONFIG_OPTION_COUNT - 1) {
+                if (m_configList.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
                     startAttack();
                 } else {
                     // Logic to toggle next if applicable
