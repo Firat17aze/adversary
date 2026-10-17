@@ -15,6 +15,8 @@
 #include "../theme.h"
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "screen_interface.h"
 
 namespace adversary {
@@ -101,15 +103,10 @@ private:
     
     ProbeFloodScreenState screenState_;
     
-    // Config options
-    int configSelection_;
-    int scrollOffset_;
+    // Config options. The shared model owns selection + scroll window + wrap; the renderer
+    // feeds it the live viewport each frame so the two can't drift (slice-0062).
     static constexpr int CONFIG_OPTION_COUNT = 6;
-    // Rows the config list can show, set each frame by the renderer from the live layout
-    // and read by the scroll logic so the two can't drift (a count smaller than what fits
-    // scrolls early; larger hides the selection). Seeded to "all options fit" for input
-    // before the first paint.
-    int configVisibleItems_ = CONFIG_OPTION_COUNT;
+    ListScrollModel configList_;
     
     // Config values
     ProbeFloodMode mode_;

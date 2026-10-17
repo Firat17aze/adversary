@@ -18,8 +18,6 @@ ProbeFloodScreen::ProbeFloodScreen()
     , shouldExit_(false)
     , lastUpdate_(0)
     , screenState_(ProbeFloodScreenState::CONFIG)
-    , configSelection_(0)
-    , scrollOffset_(0)
     , mode_(ProbeFloodMode::RANDOM_SSIDS)
     , channel_(0)  // 0 = hopping
     , intervalMs_(50)
@@ -51,9 +49,8 @@ void ProbeFloodScreen::show() {
     needsRedraw_ = true;
     shouldExit_ = false;
     screenState_ = ProbeFloodScreenState::CONFIG;
-    configSelection_ = 0;
-    scrollOffset_ = 0;
-    
+    configList_.setItemCount(0);  // Reset selection + scroll to the top
+
     footerHints_.setHints({
         {' ', "Focus"},
         {'s', "Start"},
@@ -249,51 +246,35 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
     options[5].label = "[START]";
     options[5].value[0] = '\0';
     
-    // Calculate visible area
+    // The shared component derives the visible-row count from the list rect (below any target
+    // line, down to the footer), keeps the selection on screen, and draws the unified thumb in
+    // place of the old ^/v markers; this callback paints one option row.
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
-    int maxVisibleItems = (footerY - y) / lineHeight;
-    if (maxVisibleItems < 1) maxVisibleItems = 1;
-    configVisibleItems_ = maxVisibleItems;  // single source of truth, read by handleUp/Down
+    configList_.setItemCount(CONFIG_OPTION_COUNT);
+    ScrollableList::render(canvas, configList_, 0, y, screenWidth, footerY - y, lineHeight,
+        [this, &options, lineHeight, labelX, valueX](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (selected) {
+                // Dim highlight when the footer has focus.
+                uint16_t highlightColor = footerHints_.hasFocus()
+                    ? theme::BG_SECONDARY()
+                    : theme::BG_SELECTED();
+                c.fillRect(0, rowY, c.width(), lineHeight, highlightColor);
+            }
 
-    // Draw visible options
-    for (int i = scrollOffset_; i < CONFIG_OPTION_COUNT && (i - scrollOffset_) < maxVisibleItems; i++) {
-        bool selected = (i == configSelection_);
-        
-        if (selected) {
-            uint16_t highlightColor = footerHints_.hasFocus() 
-                ? theme::BG_SECONDARY() 
-                : theme::BG_SELECTED();
-            canvas.fillRect(0, y - 2, screenWidth, lineHeight, highlightColor);
-        }
-        
-        canvas.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-        
-        if (i == 5) {
-            // Start button - centered
-            int textWidth = strlen(options[i].label) * 6;
-            canvas.setCursor((screenWidth - textWidth) / 2, y);
-            canvas.print(options[i].label);
-        } else {
-            canvas.setCursor(labelX, y);
-            canvas.print(options[i].label);
-            canvas.setCursor(valueX, y);
-            canvas.print(options[i].value);
-        }
-        
-        y += lineHeight;
-    }
-    
-    // Scroll indicators
-    if (scrollOffset_ > 0) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(screenWidth - 12, HEADER_HEIGHT + 4);
-        canvas.print("^");
-    }
-    if (scrollOffset_ + maxVisibleItems < CONFIG_OPTION_COUNT) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(screenWidth - 12, footerY - lineHeight);
-        canvas.print("v");
-    }
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
+
+            if (idx == CONFIG_OPTION_COUNT - 1) {
+                // Start button - centered
+                int textWidth = strlen(options[idx].label) * 6;
+                c.setCursor((c.width() - textWidth) / 2, rowY + 2);
+                c.print(options[idx].label);
+            } else {
+                c.setCursor(labelX, rowY + 2);
+                c.print(options[idx].label);
+                c.setCursor(valueX, rowY + 2);
+                c.print(options[idx].value);
+            }
+        });
 #else
     (void)canvas;
 #endif
@@ -470,34 +451,21 @@ bool ProbeFloodScreen::handleInput(char key) {
 
 void ProbeFloodScreen::handleUp() {
     if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        configSelection_--;
-        if (configSelection_ < 0) {
-            configSelection_ = CONFIG_OPTION_COUNT - 1;
-            scrollOffset_ = CONFIG_OPTION_COUNT - configVisibleItems_;
-            if (scrollOffset_ < 0) scrollOffset_ = 0;
-        }
-        if (configSelection_ < scrollOffset_) {
-            scrollOffset_ = configSelection_;
-        }
+        configList_.setItemCount(CONFIG_OPTION_COUNT);
+        configList_.moveUp();  // wraps to last; model keeps the selection on screen
     }
 }
 
 void ProbeFloodScreen::handleDown() {
     if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        configSelection_++;
-        if (configSelection_ >= CONFIG_OPTION_COUNT) {
-            configSelection_ = 0;
-            scrollOffset_ = 0;
-        }
-        if (configSelection_ >= scrollOffset_ + configVisibleItems_) {
-            scrollOffset_ = configSelection_ - configVisibleItems_ + 1;
-        }
+        configList_.setItemCount(CONFIG_OPTION_COUNT);
+        configList_.moveDown();  // wraps to first; model keeps the selection on screen
     }
 }
 
 void ProbeFloodScreen::handleSelect() {
     if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        switch (configSelection_) {
+        switch (configList_.selectedIndex()) {
             case 0:  // Mode
                 mode_ = static_cast<ProbeFloodMode>((static_cast<int>(mode_) + 1) % 4);
                 break;
