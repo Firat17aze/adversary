@@ -13,6 +13,8 @@
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
@@ -197,12 +199,9 @@ private:
     // ~45 B) instead of the full CapturedHandshake (~1.4 KB) — the list only needs
     // SSID/BSSID/type flags for display + delete; the actual handshake is already
     // on SD. This is what kept the History view from nearly OOMing mid-capture.
-    int handshakeListScroll_ = 0;
-    int handshakeListSelection_ = 0;
-    // Rows the handshake list can show, set by drawHandshakeList from the live layout and
-    // read by the scroll logic so the two can't drift (the input path previously assumed a
-    // fixed 4 while the renderer drew height/itemHeight). Seeded for input before first paint.
-    int handshakeListVisibleItems_ = 4;
+    // The shared model owns selection + scroll window + wrap; drawHandshakeList feeds it the
+    // live viewport each frame so the two can't drift (slice-0062).
+    ListScrollModel handshakeList_;
     std::vector<SessionHandshakeEntry> sessionHandshakes_;
     std::vector<SessionHandshakeEntry> sessionHandshakeBuffer_;
     int deletionCandidateIndex_ = -1;

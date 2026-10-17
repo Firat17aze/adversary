@@ -141,8 +141,7 @@ void HandshakeScreen::hide() {
     // Swap-with-empty forces the backing storage to actually free.
     std::vector<SessionHandshakeEntry>().swap(sessionHandshakeBuffer_);
     std::vector<SessionHandshakeEntry>().swap(sessionHandshakes_);
-    handshakeListScroll_ = 0;
-    handshakeListSelection_ = 0;
+    handshakeList_.setItemCount(0);  // Reset selection + scroll to the top
 
     // Reset state when leaving screen
     screenState_ = HandshakeScreenState::CONFIG;
@@ -298,8 +297,7 @@ bool HandshakeScreen::handleInput(char key) {
                     // View handshake list (Auto Hunt only)
                     if (autoHuntMode_) {
                         loadSessionHandshakes();
-                        handshakeListScroll_ = 0;
-                        handshakeListSelection_ = 0;
+                        handshakeList_.setSelectedIndex(0);  // Start at the top of the freshly loaded list
                         returnState_ = HandshakeScreenState::CAPTURING;
                         screenState_ = HandshakeScreenState::HANDSHAKE_LIST;
                     }
@@ -348,22 +346,13 @@ bool HandshakeScreen::handleInput(char key) {
         case HandshakeScreenState::HANDSHAKE_LIST:
             switch (key) {
                 case ';':  // Navigate up
-                    if (handshakeListSelection_ > 0) {
-                        handshakeListSelection_--;
-                        if (handshakeListSelection_ < handshakeListScroll_) {
-                            handshakeListScroll_ = handshakeListSelection_;
-                        }
-                    }
+                    handshakeList_.setItemCount((int)sessionHandshakes_.size());
+                    handshakeList_.moveUp();  // wraps to last; model keeps the selection on screen
                     return true;
-                    
+
                 case '.':  // Navigate down
-                    if (handshakeListSelection_ < (int)sessionHandshakes_.size() - 1) {
-                        handshakeListSelection_++;
-                        // Adjust scroll using the row count drawHandshakeList rendered
-                        if (handshakeListSelection_ >= handshakeListScroll_ + handshakeListVisibleItems_) {
-                            handshakeListScroll_ = handshakeListSelection_ - handshakeListVisibleItems_ + 1;
-                        }
-                    }
+                    handshakeList_.setItemCount((int)sessionHandshakes_.size());
+                    handshakeList_.moveDown();  // wraps to first; model keeps the selection on screen
                     return true;
                     
                 case 'd':
@@ -423,9 +412,8 @@ void HandshakeScreen::startCapture() {
         // ~1.4KB-per-entry + beacon-heap capacity for the fresh run.
         std::vector<SessionHandshakeEntry>().swap(sessionHandshakeBuffer_);
         std::vector<SessionHandshakeEntry>().swap(sessionHandshakes_);
-        handshakeListScroll_ = 0;
-        handshakeListSelection_ = 0;
-        
+        handshakeList_.setItemCount(0);  // Reset selection + scroll to the top
+
         // Start in SCANNING state
         autoState_ = AutoHuntState::SCANNING;
         autoStateStart_ = millis();
@@ -867,12 +855,10 @@ bool HandshakeScreen::wasNetworkAttempted(const uint8_t* bssid) const {
 void HandshakeScreen::loadSessionHandshakes() {
     // Simply copy from session buffer (populated during autohunt via onHandshakeCaptured)
     sessionHandshakes_ = sessionHandshakeBuffer_;
-    
-    // Reset selection if out of bounds
-    if (handshakeListSelection_ >= (int)sessionHandshakes_.size()) {
-        handshakeListSelection_ = std::max(0, (int)sessionHandshakes_.size() - 1);
-    }
-    
+
+    // The model clamps the selection onto the (possibly shrunk) list.
+    handshakeList_.setItemCount((int)sessionHandshakes_.size());
+
 #ifdef ESP32
     LOG_D("HS", "Loaded %zu handshakes from session buffer",
           sessionHandshakes_.size());
@@ -880,8 +866,9 @@ void HandshakeScreen::loadSessionHandshakes() {
 }
 
 void HandshakeScreen::startDeletionConfirm() {
-    if (handshakeListSelection_ >= 0 && handshakeListSelection_ < (int)sessionHandshakes_.size()) {
-        deletionCandidateIndex_ = handshakeListSelection_;
+    int selected = handshakeList_.selectedIndex();
+    if (selected >= 0 && selected < (int)sessionHandshakes_.size()) {
+        deletionCandidateIndex_ = selected;
         screenState_ = HandshakeScreenState::CONFIRM_DELETE;
         needsRedraw_ = true;
     }
@@ -1449,9 +1436,7 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
     const int16_t listY = HEADER_HEIGHT + 4;
     const int16_t listHeight = canvas.height() - HEADER_HEIGHT - FOOTER_HEIGHT - 8;
     const int16_t itemHeight = 14;
-    const int16_t visibleItems = listHeight / itemHeight;
-    handshakeListVisibleItems_ = visibleItems;  // single source of truth, read by handleInput
-    
+
     if (sessionHandshakes_.empty()) {
         // Empty state
         canvas.setTextColor(theme::TEXT_DISABLED());
@@ -1462,56 +1447,50 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
         canvas.print(msg);
         return;
     }
-    
+
     canvas.setTextSize(1);
-    
-    // Draw each visible handshake
-    for (int i = 0; i < visibleItems && (handshakeListScroll_ + i) < (int)sessionHandshakes_.size(); i++) {
-        int idx = handshakeListScroll_ + i;
-        const auto& hs = sessionHandshakes_[idx];
-        
-        int16_t y = listY + (i * itemHeight);
-        bool isSelected = (idx == handshakeListSelection_);
-       
-        // Selection highlight
-        if (isSelected) {
-            canvas.fillRect(0, y - 1, canvas.width(), itemHeight, theme::ACCENT());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        
-        // Type badge
-        const char* typeStr = utils::getHandshakeTypeString(hs);
-        canvas.setCursor(4, y + 2);
-        canvas.print("[");
-        if (isSelected) canvas.setTextColor(theme::SUCCESS());
-        else canvas.setTextColor(theme::ACCENT());
-        canvas.print(typeStr);
-        if (isSelected) canvas.setTextColor(theme::TEXT_PRIMARY());
-        else canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.print("]");
-        
-        // SSID
-        canvas.setCursor(40, y + 2);
-        char ssid[17];
-        strncpy(ssid, (const char*)hs.ssid, 16);
-        ssid[16] = '\0';
-        canvas.print(ssid);
-        
-        // Quality indicator (if available - estimating from message count)
-        canvas.setCursor(canvas.width() - 30, y + 2);
-        int quality = (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90 : (hs.hasMsg2 ? 70 : 50);
-        canvas.print(quality);
-        canvas.print("%");
-    }
-    
-    // Scroll indicator
-    if ((int)sessionHandshakes_.size() > visibleItems) {
-        int16_t scrollBarHeight = (visibleItems * listHeight) / sessionHandshakes_.size();
-        int16_t scrollBarY = listY + (handshakeListScroll_ * listHeight) / sessionHandshakes_.size();
-        canvas.fillRect(canvas.width() - 3, scrollBarY, 3, scrollBarHeight, theme::ACCENT());
-    }
+
+    // The shared component derives the visible-row count from the list rect, keeps the selection
+    // on screen, and draws the unified thumb in place of the old hand-rolled scrollbar; this
+    // callback paints one handshake row. Appearance kept verbatim (the bright ACCENT bar stays
+    // until the capstone unifies all lists, ledger item 93).
+    handshakeList_.setItemCount((int)sessionHandshakes_.size());
+    ScrollableList::render(canvas, handshakeList_, 0, listY, canvas.width(), listHeight, itemHeight,
+        [this, itemHeight](Canvas& c, int idx, int16_t y, bool isSelected) {
+            const auto& hs = sessionHandshakes_[idx];
+
+            // Selection highlight
+            if (isSelected) {
+                c.fillRect(0, y - 1, c.width(), itemHeight, theme::ACCENT());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+
+            // Type badge
+            const char* typeStr = utils::getHandshakeTypeString(hs);
+            c.setCursor(4, y + 2);
+            c.print("[");
+            if (isSelected) c.setTextColor(theme::SUCCESS());
+            else c.setTextColor(theme::ACCENT());
+            c.print(typeStr);
+            if (isSelected) c.setTextColor(theme::TEXT_PRIMARY());
+            else c.setTextColor(theme::TEXT_SECONDARY());
+            c.print("]");
+
+            // SSID
+            c.setCursor(40, y + 2);
+            char ssid[17];
+            strncpy(ssid, (const char*)hs.ssid, 16);
+            ssid[16] = '\0';
+            c.print(ssid);
+
+            // Quality indicator (if available - estimating from message count)
+            c.setCursor(c.width() - 30, y + 2);
+            int quality = (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90 : (hs.hasMsg2 ? 70 : 50);
+            c.print(quality);
+            c.print("%");
+        });
 }
 
 
