@@ -12,6 +12,8 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
 #include "ui/components/text_input_popup.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include <vector>
 
 namespace adversary {
@@ -67,6 +69,11 @@ private:
     void runBleScript(int index);
     void freeBleScriptBuf();
     void parseBleScriptName(const char* sdPath, char* nameBuf, size_t bufSize);
+    // Load the SD scripts and enter SCRIPT_SELECT; shared by all three target-OS action switches.
+    void enterScriptSelect();
+
+    // Connected action-menu holds exactly this many OS-command rows (indices 0-11).
+    static constexpr int ACTION_ITEM_COUNT = 12;
 
     State m_state;
     bool m_active;
@@ -75,9 +82,10 @@ private:
     
     ui::FooterHints footerHints_;
     uint32_t m_lastUpdate;
-    int m_actionSelection;
-    int m_menuSelection; // For IDLE menu
-    int m_scrollOffset;
+    // Shared models own selection + scroll window + wrap; the draw fns feed them the live
+    // viewport each frame so the two can't drift (slice-0062/0066).
+    ListScrollModel m_actionList; // CONNECTED OS-command menu
+    int m_menuSelection; // For IDLE config menu (fixed 4 rows; not a scrolling list)
     TargetOS m_targetOs;
     
     char m_sessionName[33];
@@ -91,8 +99,7 @@ private:
     // these members support the additional "12. DuckyScript..." entry (item index 11).
     DuckyInterpreter         m_bleInterp;
     std::vector<ScriptEntry> m_bleScripts;
-    int                      m_bleScriptSel;
-    int                      m_bleScriptOffset;
+    ListScrollModel          m_bleScriptList;
     char*                    m_bleScriptBuf;
     const char*              m_bleScriptName;
 };

@@ -20,13 +20,9 @@ BleBadBleScreen::BleBadBleScreen()
     , m_shouldExit(false)
     , m_needsRedraw(true)
     , m_lastUpdate(0)
-    , m_actionSelection(0)
-    , m_scrollOffset(0)
     , m_targetOs(TargetOS::LINUX)
     , m_customInputBuf{0}
     , m_customInputLen(0)
-    , m_bleScriptSel(0)
-    , m_bleScriptOffset(0)
     , m_bleScriptBuf(nullptr)
     , m_bleScriptName(nullptr)
 {
@@ -41,7 +37,8 @@ void BleBadBleScreen::show() {
     m_shouldExit = false;
     m_needsRedraw = true;
     m_state = State::IDLE;
-    m_actionSelection = 0; // For Connected Menu
+    m_actionList.setItemCount(ACTION_ITEM_COUNT); // Connected menu
+    m_actionList.setSelectedIndex(0);
     m_menuSelection = 0;   // For Idle Config
     
     // Load Defaults for Session
@@ -237,11 +234,6 @@ void BleBadBleScreen::drawAdvertising(Canvas& canvas) {
 void BleBadBleScreen::drawConnected(Canvas& canvas) {
     ui::StatusBar::render(canvas, "BadBLE", "CONNECTED [!]");
     
-    // Header Info - REMOVED (Redundant with StatusBar)
-    // Compact Layout - List starts immediately after StatusBar (20px + 2px padding for rect)
-    // Text y = 22 (rect top) + 5 (padding) = 27
-    int y = 27;
-    
     // Expanded Action Lists - Index 10 is reserved for Dynamic Layout Toggle
     char layoutStr[20];
     KeyboardLayout currentLayout = BLESpanner::getInstance().getLayout();
@@ -264,60 +256,25 @@ void BleBadBleScreen::drawConnected(Canvas& canvas) {
     };
 
     const char** currentActions = nullptr;
-    int totalItems = 12;
-    
     switch (m_targetOs) {
         case TargetOS::WINDOWS: currentActions = actions_win; break;
         case TargetOS::LINUX:   currentActions = actions_lin; break;
         case TargetOS::MACOS:   currentActions = actions_mac; break;
     }
-    
-    // Scrolling Logic
-    const int VISIBLE_ROWS = 5; // Standard Menu items (18px) fit 5 rows (90px)
-    const int ROW_HEIGHT = 18;  // Match Menu standard
-    
-    int startIdx = m_scrollOffset;
-    int endIdx = startIdx + VISIBLE_ROWS;
-    if (endIdx > totalItems) endIdx = totalItems;
-    
-    // Render List
-    for (int i = startIdx; i < endIdx; i++) {
-        bool selected = (m_actionSelection == i);
-        if (selected) {
-            // Check if footer has focus - if so, dim the selection
-            if (footerHints_.hasFocus()) {
-                 canvas.fillRect(0, y - 5, config::SCREEN_WIDTH, ROW_HEIGHT, theme::BG_SECONDARY());
-                 canvas.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                 canvas.fillRect(0, y - 5, config::SCREEN_WIDTH, ROW_HEIGHT, theme::BG_SELECTED());
-                 canvas.setTextColor(theme::TEXT_INVERSE());
-            }
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        canvas.setCursor(15, y);
-        canvas.print(currentActions[i]);
-        y += ROW_HEIGHT;
-    }
-    
-    // Draw Scrollbar (from CapturesScreen pattern)
-    if (totalItems > VISIBLE_ROWS) {
-        int16_t barX = config::SCREEN_WIDTH - 5;
-        int16_t barY = 22; // Matches list rect start (27 - 5)
-        int16_t barHeight = VISIBLE_ROWS * ROW_HEIGHT; // 90px
-        
-        // Track
-        canvas.fillRect(barX, barY, 4, barHeight, theme::BG_TERTIARY());
-        
-        // Thumb
-        int16_t thumbHeight = (VISIBLE_ROWS * barHeight) / totalItems;
-        if (thumbHeight < 6) thumbHeight = 6;
-        
-        int maxScroll = totalItems - VISIBLE_ROWS;
-        int16_t thumbY = barY + (m_scrollOffset * (barHeight - thumbHeight)) / maxScroll;
-        
-        canvas.fillRect(barX, thumbY, 4, thumbHeight, theme::ACCENT());
-    }
+
+    // The shared component paints the selected-row band (dimmed when the footer holds focus) and
+    // the thumb, and derives the visible-row count from the rect; this callback draws content only
+    // (slice-0063/0066). The list spans from just under the status bar to the footer.
+    const int16_t listTop = 22; // status bar is 20px; 2px padding
+    const int16_t listH   = (int16_t)(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listTop);
+    m_actionList.setItemCount(ACTION_ITEM_COUNT);
+    ScrollableList::render(canvas, m_actionList, 0, listTop, config::SCREEN_WIDTH, listH,
+        theme::LIST_ROW_HEIGHT, [currentActions](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(15, rowY + 2);
+            c.print(currentActions[idx]);
+        },
+        !footerHints_.hasFocus());
 }
 
 void BleBadBleScreen::drawInputCustom(Canvas& canvas) {
@@ -387,7 +344,7 @@ void BleBadBleScreen::injectCommand() {
     
     switch (m_targetOs) {
         case TargetOS::WINDOWS:
-            switch (m_actionSelection) {
+            switch (m_actionList.selectedIndex()) {
                 case 0: spanner.sendKey(0x15, 0x08); break; // GUI+R
                 case 1: spanner.typeString("cmd\n"); break;
                 case 2: spanner.typeString("powershell\n"); break;
@@ -419,18 +376,13 @@ void BleBadBleScreen::injectCommand() {
                      }
                      break;
                 case 11: // DuckyScript
-                     loadBleScripts();
-                     m_bleScriptSel = 0;
-                     m_bleScriptOffset = 0;
-                     m_state = State::SCRIPT_SELECT;
-                     footerHints_.setHints({{'\n', "Run", true}, {'`', "Back", true}});
-                     m_needsRedraw = true;
+                     enterScriptSelect();
                      break;
             }
             break;
 
         case TargetOS::LINUX:
-            switch (m_actionSelection) {
+            switch (m_actionList.selectedIndex()) {
                 case 0: spanner.sendKey(0x17, 0x05); break; // Ctrl+Alt+T
                 case 1: spanner.sendKey(0x3B, 0x04); break; // Alt+F2
                 case 2: // Rickroll
@@ -458,18 +410,13 @@ void BleBadBleScreen::injectCommand() {
                      }
                      break;
                 case 11: // DuckyScript
-                     loadBleScripts();
-                     m_bleScriptSel = 0;
-                     m_bleScriptOffset = 0;
-                     m_state = State::SCRIPT_SELECT;
-                     footerHints_.setHints({{'\n', "Run", true}, {'`', "Back", true}});
-                     m_needsRedraw = true;
+                     enterScriptSelect();
                      break;
             }
             break;
 
         case TargetOS::MACOS:
-            switch (m_actionSelection) {
+            switch (m_actionList.selectedIndex()) {
                 case 0: spanner.sendKey(0x2C, 0x08); break; // Cmd+Space
                 case 1: spanner.typeString("Terminal\n"); break;
                 case 2: // Rickroll
@@ -502,12 +449,7 @@ void BleBadBleScreen::injectCommand() {
                      }
                      break;
                 case 11: // DuckyScript
-                     loadBleScripts();
-                     m_bleScriptSel = 0;
-                     m_bleScriptOffset = 0;
-                     m_state = State::SCRIPT_SELECT;
-                     footerHints_.setHints({{'\n', "Run", true}, {'`', "Back", true}});
-                     m_needsRedraw = true;
+                     enterScriptSelect();
                      break;
             }
             break;
@@ -612,24 +554,15 @@ bool BleBadBleScreen::handleInput(char key) {
     // SCRIPT_SELECT — browse SD scripts
     if (m_state == State::SCRIPT_SELECT) {
         int total = (int)m_bleScripts.size();
-        const int VISIBLE = 5;
         switch (key) {
             case ';':
-                if (total > 0 && m_bleScriptSel > 0) {
-                    m_bleScriptSel--;
-                    if (m_bleScriptSel < m_bleScriptOffset)
-                        m_bleScriptOffset = m_bleScriptSel;
-                }
+                if (total > 0) { m_bleScriptList.setItemCount(total); m_bleScriptList.moveUp(); }
                 return true;
             case '.':
-                if (total > 0 && m_bleScriptSel < total - 1) {
-                    m_bleScriptSel++;
-                    if (m_bleScriptSel >= m_bleScriptOffset + VISIBLE)
-                        m_bleScriptOffset = m_bleScriptSel - VISIBLE + 1;
-                }
+                if (total > 0) { m_bleScriptList.setItemCount(total); m_bleScriptList.moveDown(); }
                 return true;
             case '\n':
-                if (total > 0) runBleScript(m_bleScriptSel);
+                if (total > 0) runBleScript(m_bleScriptList.selectedIndex());
                 return true;
             case '`':
                 m_state = State::CONNECTED;
@@ -668,24 +601,16 @@ bool BleBadBleScreen::handleInput(char key) {
     switch (key) {
         case ';': // UP
         case 'k':
-            if (m_state == State::CONNECTED && m_actionSelection > 0) {
-                m_actionSelection--;
-                // Scroll Up Logic
-                if (m_actionSelection < m_scrollOffset) {
-                    m_scrollOffset = m_actionSelection;
-                }
+            if (m_state == State::CONNECTED) {
+                m_actionList.setItemCount(ACTION_ITEM_COUNT);
+                m_actionList.moveUp();
             }
             return true;
         case '.': // DOWN
         case 'j':
-             // Max items = 12 (indices 0-11)
-            if (m_state == State::CONNECTED && m_actionSelection < 11) {
-                m_actionSelection++;
-                // Scroll Down Logic
-                const int VISIBLE_ROWS = 5; // Must match drawConnected
-                if (m_actionSelection >= m_scrollOffset + VISIBLE_ROWS) {
-                    m_scrollOffset = m_actionSelection - VISIBLE_ROWS + 1;
-                }
+            if (m_state == State::CONNECTED) {
+                m_actionList.setItemCount(ACTION_ITEM_COUNT);
+                m_actionList.moveDown();
             }
             return true;
         case '\n':
@@ -722,39 +647,19 @@ void BleBadBleScreen::drawScriptSelect(Canvas& canvas) {
         return;
     }
 
-    const int VISIBLE = 5;
-    const int ROW_H   = 18;
-    int total = (int)m_bleScripts.size();
-    int y     = 22;
-
-    int start = m_bleScriptOffset;
-    int end   = start + VISIBLE;
-    if (end > total) end = total;
-
-    for (int i = start; i < end; i++) {
-        bool sel = (i == m_bleScriptSel);
-        if (sel) {
-            canvas.fillRect(0, y, config::SCREEN_WIDTH, ROW_H, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_INVERSE());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        canvas.setCursor(10, y + 3);
-        canvas.print(m_bleScripts[i].name);
-        y += ROW_H;
-    }
-
-    if (total > VISIBLE) {
-        int barH   = VISIBLE * ROW_H;
-        int barX   = config::SCREEN_WIDTH - 5;
-        int barY   = 22;
-        canvas.fillRect(barX, barY, 4, barH, theme::BG_TERTIARY());
-        int thumbH = (VISIBLE * barH) / total;
-        if (thumbH < 6) thumbH = 6;
-        int maxScr = total - VISIBLE;
-        int thumbY = barY + (m_bleScriptOffset * (barH - thumbH)) / maxScr;
-        canvas.fillRect(barX, thumbY, 4, thumbH, theme::ACCENT());
-    }
+    // SCRIPT_SELECT does not wire footer-focus input (ledgered gap, see slice-0066), so the band
+    // stays always-focused; the component paints band + thumb and the callback draws content only
+    // (slice-0063/0066).
+    const int16_t listTop = 22;
+    const int16_t listH   = (int16_t)(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listTop);
+    m_bleScriptList.setItemCount((int)m_bleScripts.size());
+    ScrollableList::render(canvas, m_bleScriptList, 0, listTop, config::SCREEN_WIDTH, listH,
+        theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(10, rowY + 2);
+            c.print(m_bleScripts[idx].name);
+        },
+        true);
 }
 
 void BleBadBleScreen::drawScriptRunning(Canvas& canvas) {
@@ -791,6 +696,15 @@ void BleBadBleScreen::drawScriptDone(Canvas& canvas) {
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.drawString("Press Back", cx, 70);
     canvas.setTextDatum(top_left);
+}
+
+void BleBadBleScreen::enterScriptSelect() {
+    loadBleScripts();
+    m_bleScriptList.setItemCount((int)m_bleScripts.size());
+    m_bleScriptList.setSelectedIndex(0);
+    m_state = State::SCRIPT_SELECT;
+    footerHints_.setHints({{'\n', "Run", true}, {'`', "Back", true}});
+    m_needsRedraw = true;
 }
 
 void BleBadBleScreen::loadBleScripts() {
