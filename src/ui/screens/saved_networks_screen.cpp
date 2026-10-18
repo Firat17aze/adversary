@@ -11,16 +11,14 @@
 namespace adversary {
 
 SavedNetworksScreen::SavedNetworksScreen() {
-    selectedIndex_ = 0;
-    scrollOffset_ = 0;
 }
 
 void SavedNetworksScreen::show() {
     visible_ = true;
     shouldExit_ = false;
     needsRedraw_ = true;
-    selectedIndex_ = 0;
-    scrollOffset_ = 0;
+    list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
+    list_.setSelectedIndex(0);
 }
 
 void SavedNetworksScreen::hide() {
@@ -52,35 +50,30 @@ void SavedNetworksScreen::render(Canvas& canvas) {
         canvas.setCursor((canvas.width() - strlen(msg) * 6) / 2, canvas.height() / 2);
         canvas.print(msg);
     } else {
-        int y = HEADER_HEIGHT + 4;
-        int visibleCount = (canvas.height() - HEADER_HEIGHT - FOOTER_HEIGHT) / ENTRY_HEIGHT;
-        
-        for (int i = 0; i < visibleCount && (scrollOffset_ + i) < (int)creds.size(); i++) {
-            int idx = scrollOffset_ + i;
-            const auto& cred = creds[idx];
-            bool selected = (idx == selectedIndex_);
-            
-            int entryY = y + (i * ENTRY_HEIGHT);
-            
-            if (selected && !footerHints_.hasFocus()) {
-                canvas.fillRect(0, entryY, canvas.width(), ENTRY_HEIGHT - 2, theme::BG_SELECTED());
-            }
-            
-            canvas.setTextSize(1);
-            canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_PRIMARY());
-            canvas.setCursor(4, entryY + 4);
-            canvas.print(cred.ssid);
-            
-            canvas.setCursor(4, entryY + 14);
-            canvas.setTextColor(selected ? theme::TEXT_SECONDARY() : theme::TEXT_DISABLED());
-            
-            // Mask password
-            if (cred.password[0] == '\0') {
-                canvas.print("(Open Network)");
-            } else {
-                canvas.print("********");
-            }
-        }
+        // The shared component paints the selected-row band (dimmed when the footer holds focus)
+        // and the thumb, and derives the visible-row count from the rect (killing the old
+        // hardcoded-"4" drift); this callback draws the two content lines (slice-0063/0065).
+        int16_t y = HEADER_HEIGHT + 4;
+        int16_t listH = (int16_t)(canvas.height() - y - FOOTER_HEIGHT);
+        list_.setItemCount((int)creds.size());
+        ScrollableList::render(canvas, list_, 0, y, canvas.width(), listH, ENTRY_HEIGHT,
+            [&creds](Canvas& c, int idx, int16_t rowY, bool selected) {
+                const auto& cred = creds[idx];
+                c.setTextSize(1);
+                c.setTextColor(theme::TEXT_PRIMARY());
+                c.setCursor(4, rowY + 4);
+                c.print(cred.ssid);
+
+                // Selected row brightens the masked password from disabled to secondary.
+                c.setCursor(4, rowY + 14);
+                c.setTextColor(selected ? theme::TEXT_SECONDARY() : theme::TEXT_DISABLED());
+                if (cred.password[0] == '\0') {
+                    c.print("(Open Network)");
+                } else {
+                    c.print("********");
+                }
+            },
+            !footerHints_.hasFocus());
     }
     
     // Footer Hints
@@ -90,8 +83,8 @@ void SavedNetworksScreen::render(Canvas& canvas) {
     });
     
     char countBuf[16];
-    snprintf(countBuf, sizeof(countBuf), "%d/%d", 
-             creds.empty() ? 0 : selectedIndex_ + 1, 
+    snprintf(countBuf, sizeof(countBuf), "%d/%d",
+             creds.empty() ? 0 : list_.selectedIndex() + 1,
              (int)creds.size());
     footerHints_.setRightContent(countBuf);
     footerHints_.render(canvas);
@@ -149,26 +142,20 @@ bool SavedNetworksScreen::handleInput(char key) {
 }
 
 void SavedNetworksScreen::navigateUp() {
-    int n = (int)SettingsManager::getInstance().getSavedCredentials().size();
-    if (n <= 0) return;
-    selectedIndex_ = (selectedIndex_ - 1 + n) % n;  // wraps to last
-    if (selectedIndex_ < scrollOffset_) scrollOffset_ = selectedIndex_;
-    else if (selectedIndex_ >= scrollOffset_ + 4) scrollOffset_ = selectedIndex_ - 3;
+    list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
+    list_.moveUp();  // wraps to last; model keeps the selection on screen
 }
 
 void SavedNetworksScreen::navigateDown() {
-    int n = (int)SettingsManager::getInstance().getSavedCredentials().size();
-    if (n <= 0) return;
-    selectedIndex_ = (selectedIndex_ + 1) % n;  // wraps to first
-    // Adjust scroll offset (assume 4 visible items as a safe guess)
-    if (selectedIndex_ >= scrollOffset_ + 4) scrollOffset_ = selectedIndex_ - 3;
-    else if (selectedIndex_ < scrollOffset_) scrollOffset_ = selectedIndex_;
+    list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
+    list_.moveDown();  // wraps to first; model keeps the selection on screen
 }
 
 void SavedNetworksScreen::selectCurrent() {
     const auto& creds = SettingsManager::getInstance().getSavedCredentials();
-    if (selectedIndex_ >= 0 && selectedIndex_ < (int)creds.size()) {
-        selectedCred_ = creds[selectedIndex_];
+    int sel = list_.selectedIndex();
+    if (sel >= 0 && sel < (int)creds.size()) {
+        selectedCred_ = creds[sel];
         setupActionMenu();
         actionMenu_.show();
     }
@@ -195,11 +182,10 @@ void SavedNetworksScreen::handleAction(char action) {
         case 'F':
         case 'f':
             LOG_I("SAVEDNET", "Forgetting %s", selectedCred_.ssid);
-            SettingsManager::getInstance().removeWiFiCredential(selectedIndex_);
+            SettingsManager::getInstance().removeWiFiCredential(list_.selectedIndex());
             SettingsManager::getInstance().save();
-            if (selectedIndex_ >= (int)SettingsManager::getInstance().getSavedCredentials().size() && selectedIndex_ > 0) {
-                selectedIndex_--;
-            }
+            // The model re-clamps the selection onto the now-shorter list.
+            list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
             break;
     }
     needsRedraw_ = true;

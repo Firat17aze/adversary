@@ -24,7 +24,6 @@ ServerMenuScreen::ServerMenuScreen()
     : visible_(false)
     , shouldExit_(false)
     , needsRedraw_(true)
-    , selection_(0)
     , serverRunning_(false)
 {
 }
@@ -34,7 +33,8 @@ ServerMenuScreen::~ServerMenuScreen() {
 }
 
 void ServerMenuScreen::init() {
-    selection_ = 0;
+    menuList_.setItemCount(MENU_ITEMS);
+    menuList_.setSelectedIndex(0);
     needsRedraw_ = true;
     serverRunning_ = ServerManager::getInstance().isRunning();
     
@@ -133,53 +133,38 @@ void ServerMenuScreen::drawMenu(Canvas& canvas) {
         startY += 16;
     }
     
-    // Draw menu items
-    for (int i = 0; i < MENU_ITEMS; i++) {
-        int y = startY + (i * ITEM_HEIGHT);
-        
-        // Selection highlight
-        if (i == selection_) {
-            canvas.fillRect(4, y - 2, canvas.width() - 8, ITEM_HEIGHT, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        
-        // Draw item label
-        canvas.setTextSize(1);
-        canvas.setCursor(12, y + 4);
-        
-        // Special handling based on item
-        if (i == 0) {
-            // Start/Stop Server
-            if (serverRunning_) {
-                canvas.print("Stop Server");
-            } else {
-                canvas.print("Start Server");
+    // The shared component paints the selected-row band and (when needed) the thumb; this list
+    // never overflows, so no thumb draws and the payoff is the unified band idiom. The callback
+    // draws each item's label plus its coloured status suffix (slice-0063/0065).
+    menuList_.setItemCount(MENU_ITEMS);
+    const int16_t listH = (int16_t)(MENU_ITEMS * theme::LIST_ROW_HEIGHT);
+    ScrollableList::render(canvas, menuList_, 0, (int16_t)startY, canvas.width(), listH,
+        theme::LIST_ROW_HEIGHT, [this, &settings](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
+            c.setTextSize(1);
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(12, rowY + 2);
+            if (i == 0) {
+                c.print(serverRunning_ ? "Stop Server" : "Start Server");
+            } else if (i == 1) {
+                c.print("Server Status");
+                if (serverRunning_) {
+                    c.setTextColor(theme::SUCCESS());
+                    c.print(" [RUNNING]");
+                } else {
+                    c.setTextColor(theme::TEXT_SECONDARY());
+                    c.print(" [STOPPED]");
+                }
+            } else if (i == 2) {
+                c.print("Configure Auth");
+                if (settings.system.dashboardAuthEnabled) {
+                    c.setTextColor(theme::SUCCESS());
+                    c.print(" [ON]");
+                } else {
+                    c.setTextColor(theme::TEXT_SECONDARY());
+                    c.print(" [OFF]");
+                }
             }
-        } else if (i == 1) {
-            // Server Status
-            canvas.print("Server Status");
-            // Show status indicator
-            if (serverRunning_) {
-                canvas.setTextColor(theme::SUCCESS());
-                canvas.print(" [RUNNING]");
-            } else {
-                canvas.setTextColor(theme::TEXT_SECONDARY());
-                canvas.print(" [STOPPED]");
-            }
-        } else if (i == 2) {
-            // Configure Auth
-            canvas.print("Configure Auth");
-            if (settings.system.dashboardAuthEnabled) {
-                canvas.setTextColor(theme::SUCCESS());
-                canvas.print(" [ON]");
-            } else {
-                canvas.setTextColor(theme::TEXT_SECONDARY());
-                canvas.print(" [OFF]");
-            }
-        }
-    }
+        });
 #else
     (void)canvas;
 #endif
@@ -213,18 +198,20 @@ bool ServerMenuScreen::handleInput(char key) {
     switch (key) {
         case ';': // Up (wraps)
         case 'w':
-            selection_ = (selection_ + MENU_ITEMS - 1) % MENU_ITEMS;
+            menuList_.setItemCount(MENU_ITEMS);
+            menuList_.moveUp();
             return true;
 
         case '.': // Down (wraps)
         case 's':
-            selection_ = (selection_ + 1) % MENU_ITEMS;
+            menuList_.setItemCount(MENU_ITEMS);
+            menuList_.moveDown();
             return true;
-            
+
         case '\r': // Enter
         case '\n':
             // Handle menu selection
-            switch (selection_) {
+            switch (menuList_.selectedIndex()) {
                 case 0: // Start/Stop Server
                     if (serverRunning_) {
                         ServerManager::getInstance().stop();

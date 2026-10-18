@@ -93,8 +93,6 @@ BadUsbScreen::BadUsbScreen()
     , m_active(false)
     , m_shouldExit(false)
     , m_needsRedraw(true)
-    , m_selectedScript(0)
-    , m_scrollOffset(0)
     , m_activatingStart(0)
     , m_scriptBuffer(nullptr)
     , m_scriptName(nullptr)
@@ -105,10 +103,10 @@ void BadUsbScreen::show() {
     m_active         = true;
     m_shouldExit     = false;
     m_needsRedraw    = true;
-    m_selectedScript = 0;
-    m_scrollOffset   = 0;
 
     loadScripts();
+    m_scriptList.setItemCount((int)m_scripts.size());
+    m_scriptList.setSelectedIndex(0);
 
 #if defined(TARGET_CARDPUTER)
     if (UsbHidKeyboard::getInstance().isReady()) {
@@ -247,52 +245,33 @@ void BadUsbScreen::drawActivating(Canvas& canvas) {
 void BadUsbScreen::drawIdle(Canvas& canvas) {
     ui::StatusBar::render(canvas, "BadUSB", "SELECT");
 
-    int y     = 22;
     int total = (int)m_scripts.size();
-
-    int start = m_scrollOffset;
-    int end   = start + VISIBLE_ROWS;
-    if (end > total) end = total;
-
-    for (int i = start; i < end; i++) {
-        bool sel = (i == m_selectedScript);
-        if (sel) {
-            canvas.fillRect(0, y, config::SCREEN_WIDTH, ROW_H, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_INVERSE());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        canvas.setCursor(10, y + 3);
-        canvas.print(m_scripts[i].name);
-
-        // Small SD indicator for user scripts
-        if (!m_scripts[i].isBuiltIn) {
-            canvas.setTextColor(sel ? theme::TEXT_INVERSE() : theme::TEXT_SECONDARY());
-            canvas.setCursor(config::SCREEN_WIDTH - 22, y + 3);
-            canvas.print("SD");
-        }
-
-        y += ROW_H;
-    }
-
-    if (total > VISIBLE_ROWS) {
-        int barH   = VISIBLE_ROWS * ROW_H;
-        int barX   = config::SCREEN_WIDTH - 5;
-        int barY   = 22;
-        canvas.fillRect(barX, barY, 4, barH, theme::BG_TERTIARY());
-        int thumbH = (VISIBLE_ROWS * barH) / total;
-        if (thumbH < 6) thumbH = 6;
-        int maxScr = total - VISIBLE_ROWS;
-        int thumbY = barY + (m_scrollOffset * (barH - thumbH)) / maxScr;
-        canvas.fillRect(barX, thumbY, 4, thumbH, theme::ACCENT());
-    }
-
     if (total == 0) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setTextDatum(top_center);
         canvas.drawString("No scripts found", config::SCREEN_WIDTH/2, 50);
         canvas.setTextDatum(top_left);
+        return;
     }
+
+    // The shared component paints the selected-row band and the one proportional thumb (replacing
+    // the bespoke copy) and derives the visible-row count from the rect; this callback draws the
+    // script name plus the "SD" badge for user scripts (slice-0063/0065).
+    const int16_t listY = 22;
+    const int16_t listH = (int16_t)(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listY);
+    m_scriptList.setItemCount(total);
+    ScrollableList::render(canvas, m_scriptList, 0, listY, config::SCREEN_WIDTH, listH,
+        theme::LIST_ROW_HEIGHT, [this](Canvas& c, int i, int16_t rowY, bool sel) {
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(10, rowY + 2);
+            c.print(m_scripts[i].name);
+
+            if (!m_scripts[i].isBuiltIn) {
+                c.setTextColor(sel ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+                c.setCursor(config::SCREEN_WIDTH - 22, rowY + 2);
+                c.print("SD");
+            }
+        });
 }
 
 void BadUsbScreen::drawRunning(Canvas& canvas) {
@@ -371,24 +350,17 @@ bool BadUsbScreen::handleInput(char key) {
     }
 
     // IDLE
-    int total = (int)m_scripts.size();
     switch (key) {
         case ';':  // UP
-            if (total > 0 && m_selectedScript > 0) {
-                m_selectedScript--;
-                if (m_selectedScript < m_scrollOffset)
-                    m_scrollOffset = m_selectedScript;
-            }
+            m_scriptList.setItemCount((int)m_scripts.size());
+            m_scriptList.moveUp();  // wraps to last; model keeps the selection on screen
             return true;
         case '.':  // DOWN
-            if (total > 0 && m_selectedScript < total - 1) {
-                m_selectedScript++;
-                if (m_selectedScript >= m_scrollOffset + VISIBLE_ROWS)
-                    m_scrollOffset = m_selectedScript - VISIBLE_ROWS + 1;
-            }
+            m_scriptList.setItemCount((int)m_scripts.size());
+            m_scriptList.moveDown();  // wraps to first; model keeps the selection on screen
             return true;
         case '\n':
-            runScript(m_selectedScript);
+            runScript(m_scriptList.selectedIndex());
             return true;
         case '`':
             m_shouldExit = true;

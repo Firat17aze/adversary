@@ -9,6 +9,8 @@
 #include "modules/ble/ble_spanner.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include <vector>
 
 namespace adversary {
@@ -49,7 +51,9 @@ private:
 
     State m_state;
     BleSpamPrompt m_selectedPrompt;
-    int m_configSelection;
+    // The shared model owns selection + wrap; drawConfig feeds it the live viewport each frame
+    // so the two can't drift (slice-0062/0065).
+    ListScrollModel m_promptList;
     
     bool m_active;
     bool m_shouldExit;

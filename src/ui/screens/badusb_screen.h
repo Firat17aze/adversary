@@ -2,6 +2,8 @@
 #include "ui/screens/screen_interface.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "modules/badusb/ducky_interpreter.h"
 #include "modules/badusb/script_entry.h"
 #include <vector>
@@ -31,8 +33,6 @@ public:
     void resetExitFlag() override { m_shouldExit = false; }
 
 private:
-    static constexpr int    VISIBLE_ROWS     = 5;
-    static constexpr int    ROW_H            = 18;
     static constexpr size_t SCRIPT_BUF_SIZE  = 8192; // max SD script size
 
     enum class State {
@@ -59,8 +59,9 @@ private:
     bool     m_active;
     bool     m_shouldExit;
     bool     m_needsRedraw;
-    int      m_selectedScript;
-    int      m_scrollOffset;
+    // The shared model owns selection + scroll window + wrap; drawIdle feeds it the live viewport
+    // each frame so the two can't drift (slice-0062/0065).
+    ListScrollModel m_scriptList;
     uint32_t m_activatingStart;
     char*    m_scriptBuffer;   // heap buffer for active SD script; nullptr when unused
     const char* m_scriptName; // display name of the running script

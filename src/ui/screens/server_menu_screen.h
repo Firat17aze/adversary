@@ -16,6 +16,8 @@
 #include "../components/footer_hints.h"
 #include "../components/action_menu.h"
 #include "../components/toast_manager.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "screen_interface.h"
 #include "modules/storage/settings_manager.h"
 
@@ -66,8 +68,9 @@ private:
     bool shouldExit_;
     bool needsRedraw_;
     
-    // Menu state
-    int selection_;
+    // Menu state. The shared model owns selection + wrap; drawMenu feeds it the live viewport
+    // each frame so the two can't drift (slice-0062/0065).
+    ListScrollModel menuList_;
     static constexpr int MENU_ITEMS = 3;
     const char* menuLabels_[MENU_ITEMS] = {
         "Start Server",
@@ -83,7 +86,6 @@ private:
     bool serverRunning_;
     
     static constexpr int16_t HEADER_HEIGHT = 20;
-    static constexpr int16_t ITEM_HEIGHT = 20;
 };
 
 } // namespace adversary

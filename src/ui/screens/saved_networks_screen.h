@@ -12,6 +12,8 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/action_menu.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include <vector>
 
 #ifdef ESP32
@@ -52,9 +54,10 @@ private:
     bool shouldExit_ = false;
     bool needsRedraw_ = true;
     
-    int selectedIndex_ = 0;
-    int scrollOffset_ = 0;
-    
+    // The shared model owns selection + scroll window + wrap; render feeds it the live viewport
+    // each frame, which also fixes the old hardcoded-"4 visible" drift (slice-0062/0065).
+    ListScrollModel list_;
+
     ui::ActionMenu actionMenu_;
     ui::FooterHints footerHints_;
     WiFiCredential selectedCred_;

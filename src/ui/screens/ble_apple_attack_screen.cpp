@@ -14,7 +14,6 @@ namespace adversary {
 BleAppleAttackScreen::BleAppleAttackScreen()
     : m_state(State::CONFIG)
     , m_selectedPrompt(BleSpamPrompt::PAIRING)
-    , m_configSelection(0)
     , m_active(false)
     , m_shouldExit(false)
     , m_needsRedraw(true)
@@ -27,6 +26,7 @@ BleAppleAttackScreen::BleAppleAttackScreen()
         {BleSpamPrompt::TRANSFER_PHONE, "Transfer Phone (Modal)"},
         {BleSpamPrompt::GUIDED_ACCESS, "Guided Access (Modal)"}
     };
+    m_promptList.setItemCount((int)m_promptOptions.size());
 }
 
 void BleAppleAttackScreen::show() {
@@ -80,24 +80,17 @@ void BleAppleAttackScreen::drawConfig(Canvas& canvas) {
     canvas.print("Select Attack Type:");
     y += 12;
 
-    for (size_t i = 0; i < m_promptOptions.size(); ++i) {
-        bool selected = (m_configSelection == (int)i);
-        if (selected) {
-            if (footerHints_.hasFocus()) {
-                 canvas.fillRect(0, y - 1, config::SCREEN_WIDTH, 12, theme::BG_SECONDARY());
-                 canvas.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                 canvas.fillRect(0, y - 1, config::SCREEN_WIDTH, 12, theme::BG_SELECTED());
-                 canvas.setTextColor(theme::TEXT_INVERSE());
-            }
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        
-        canvas.setCursor(10, y);
-        canvas.print(m_promptOptions[i].label);
-        y += 12;
-    }
+    // The shared component paints the selected-row band (dimmed to BG_SECONDARY when the footer
+    // holds focus) and the thumb; this callback draws one option's label only (slice-0063/0065).
+    m_promptList.setItemCount((int)m_promptOptions.size());
+    const int16_t listH = (int16_t)(m_promptOptions.size() * theme::LIST_ROW_HEIGHT);
+    ScrollableList::render(canvas, m_promptList, 0, (int16_t)y, config::SCREEN_WIDTH, listH,
+        theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(10, rowY + 2);
+            c.print(m_promptOptions[idx].label);
+        },
+        !footerHints_.hasFocus());
 }
 
 void BleAppleAttackScreen::drawAttack(Canvas& canvas) {
@@ -126,7 +119,7 @@ void BleAppleAttackScreen::drawAttack(Canvas& canvas) {
     y += 12;
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(5, y);
-    canvas.printf("Type: %s", m_promptOptions[m_configSelection].label);
+    canvas.printf("Type: %s", m_promptOptions[m_promptList.selectedIndex()].label);
 }
 
 void BleAppleAttackScreen::startAttack() {
@@ -135,7 +128,7 @@ void BleAppleAttackScreen::startAttack() {
     
     BleSpamConfig cfg;
     cfg.provider = BleSpamProvider::APPLE;
-    cfg.prompt = m_promptOptions[m_configSelection].prompt;
+    cfg.prompt = m_promptOptions[m_promptList.selectedIndex()].prompt;
     cfg.intensity = 10;
     
     BLESpanner::getInstance().start(cfg);
@@ -168,16 +161,18 @@ bool BleAppleAttackScreen::handleInput(char key) {
     switch (key) {
         case ';': // UP
         case 'k':
-            if (m_state == State::CONFIG && m_configSelection > 0) {
-                m_configSelection--;
+            if (m_state == State::CONFIG) {
+                m_promptList.setItemCount((int)m_promptOptions.size());
+                m_promptList.moveUp();  // wraps to last; model keeps the selection on screen
                 m_needsRedraw = true;
             }
             return true;
-            
+
         case '.': // DOWN
         case 'j':
-            if (m_state == State::CONFIG && m_configSelection < (int)m_promptOptions.size() - 1) {
-                m_configSelection++;
+            if (m_state == State::CONFIG) {
+                m_promptList.setItemCount((int)m_promptOptions.size());
+                m_promptList.moveDown();  // wraps to first; model keeps the selection on screen
                 m_needsRedraw = true;
             }
             return true;
