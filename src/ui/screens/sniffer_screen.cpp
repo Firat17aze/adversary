@@ -31,8 +31,6 @@ SnifferScreen::SnifferScreen()
 #endif
     , m_screenState(SnifferScreenState::STATS)
     , m_packetLogHead(0)
-    , m_packetLogSelection(0)
-    , m_packetLogScroll(0)
     , m_logPaused(false)
     , m_actionMenuSelection(0)
     , m_actionCount(0)
@@ -219,7 +217,7 @@ bool SnifferScreen::handleInput(char key)
             } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
                 // Snapshot the selected packet now: the ring mutates in place and auto-scroll can
                 // move the selection while the menu is open, so the action must act on this copy.
-                m_selectedPacket = m_packetLog[m_packetLogSelection];
+                m_selectedPacket = m_packetLog[m_packetLogList.selectedIndex()];
                 buildActionList(m_selectedPacket);
                 m_actionMenuSelection = 0;
                 m_screenState = SnifferScreenState::ACTION_MENU;
@@ -270,29 +268,23 @@ bool SnifferScreen::handleInput(char key)
                     m_actionMenuSelection--;
                     m_needsRedraw = true;
                 }
-            } else if (m_screenState == SnifferScreenState::PACKET_LOG && m_packetLogSelection > 0) {
-                m_packetLogSelection--;
-                if (m_packetLogSelection < m_packetLogScroll) {
-                    m_packetLogScroll = m_packetLogSelection;
-                }
+            } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+                m_packetLogList.setItemCount((int)m_packetLog.size());
+                m_packetLogList.moveUp();  // wraps to the last row at the top
                 m_needsRedraw = true;
             }
             return true;
-            
+
         case '.':   // Down - navigate packet log or action menu
             if (m_screenState == SnifferScreenState::ACTION_MENU) {
                 if (m_actionMenuSelection < m_actionCount - 1) {
                     m_actionMenuSelection++;
                     m_needsRedraw = true;
                 }
-            } else if (m_screenState == SnifferScreenState::PACKET_LOG) {
-                if (m_packetLogSelection < m_packetLog.size() - 1) {
-                    m_packetLogSelection++;
-                    if (m_packetLogSelection >= m_packetLogScroll + LOG_VISIBLE_ROWS) {
-                        m_packetLogScroll = m_packetLogSelection - LOG_VISIBLE_ROWS + 1;
-                    }
-                    m_needsRedraw = true;
-                }
+            } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+                m_packetLogList.setItemCount((int)m_packetLog.size());
+                m_packetLogList.moveDown();  // wraps to the first row at the bottom
+                m_needsRedraw = true;
             }
             return true;
             
@@ -307,8 +299,8 @@ bool SnifferScreen::handleInput(char key)
             m_stats.reset();
             m_packetLog.clear();
             m_packetLogHead = 0;
-            m_packetLogSelection = 0;
-            m_packetLogScroll = 0;
+            m_packetLogList.setItemCount(0);
+            m_packetLogList.setSelectedIndex(0);
             m_needsRedraw = true;
             return true;
             
@@ -754,12 +746,14 @@ void SnifferScreen::addPacketToLog(const CapturedPacket& packet)
         m_packetLogHead = (m_packetLogHead + 1) % PACKET_LOG_SIZE;
     }
     
-    // Auto-scroll if at bottom and not paused
-    if (!m_logPaused && m_packetLogSelection >= m_packetLog.size() - 2) {
-        m_packetLogSelection = m_packetLog.size() - 1;
-        if (m_packetLogSelection >= LOG_VISIBLE_ROWS) {
-            m_packetLogScroll = m_packetLogSelection - LOG_VISIBLE_ROWS + 1;
-        }
+    // Auto-follow the tail when unpaused and the selection is already at (or next to) it. The model
+    // owns the scroll window, so setSelectedIndex pulls the newest row into view; setViewport was
+    // set by the last render, and re-derived on the next one.
+    const int newCount = (int)m_packetLog.size();
+    const bool following = !m_logPaused && m_packetLogList.selectedIndex() >= newCount - 2;
+    m_packetLogList.setItemCount(newCount);
+    if (following) {
+        m_packetLogList.setSelectedIndex(newCount - 1);
     }
 }
 
@@ -1067,39 +1061,32 @@ void SnifferScreen::drawPacketLog(Canvas& canvas) {
         return;
     }
     
-    size_t startIdx = m_packetLogScroll;
-    size_t endIdx = startIdx + LOG_VISIBLE_ROWS;
-    if (endIdx > logSize) endIdx = logSize;
-    
-    int16_t y = startY;
-    for (size_t i = startIdx; i < endIdx; i++) {
-        bool selected = (i == m_packetLogSelection);
-        drawPacketLogEntry(canvas, m_packetLog[i], y, selected);
-        y += LOG_ROW_HEIGHT;
-    }
-    
-    if (logSize > LOG_VISIBLE_ROWS) {
-        drawLogScrollbar(canvas);
-    }
-    
+    // The list rect starts below any banners (startY was pushed down by them), so the shared
+    // component derives the visible-row count from the space that actually remains above the footer.
+    m_packetLogList.setItemCount((int)logSize);
+    const int16_t listTop = startY;
+    const int16_t listH   = (int16_t)(canvas.height() - ui::FOOTER_HEIGHT - listTop);
+    const bool focused = (m_screenState == SnifferScreenState::PACKET_LOG) && !footerHints_.hasFocus();
+    ScrollableList::render(canvas, m_packetLogList, 0, listTop, canvas.width(), listH,
+        theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
+            drawPacketLogEntry(c, m_packetLog[idx], rowY);
+        },
+        focused);
+
     canvas.setTextSize(1);
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(canvas.width() - 50, canvas.height() - STATUS_HEIGHT - 12);
-    canvas.printf("[%u/%u]", (unsigned)(m_packetLogSelection + 1), (unsigned)logSize);
+    canvas.printf("[%u/%u]", (unsigned)(m_packetLogList.selectedIndex() + 1), (unsigned)logSize);
 #else
     (void)canvas;
 #endif
 }
 
-void SnifferScreen::drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, 
-                                        int16_t y, bool selected) {
+void SnifferScreen::drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, int16_t y) {
 #ifdef ESP32
+    // Content only: the shared component paints the selection band under this row (slice-0068).
     int16_t screenWidth = canvas.width();
-    
-    if (selected) {
-        canvas.fillRect(0, y, screenWidth, LOG_ROW_HEIGHT - 1, theme::BG_SELECTED());
-    }
-    
+
     canvas.setTextSize(1);
     
     canvas.setTextColor(theme::TEXT_SECONDARY());
@@ -1116,7 +1103,7 @@ void SnifferScreen::drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt,
         canvas.printf("M%d", static_cast<int>(pkt.eapolMsg));
     }
     
-    canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+    canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(50, y + 3);
     char ssidTrunc[11];
     strncpy(ssidTrunc, pkt.ssid[0] ? pkt.ssid : "<hidden>", 10);
@@ -1146,28 +1133,6 @@ void SnifferScreen::drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt,
     (void)canvas;
     (void)pkt;
     (void)y;
-    (void)selected;
-#endif
-}
-
-void SnifferScreen::drawLogScrollbar(Canvas& canvas) {
-#ifdef ESP32
-    int16_t barX = canvas.width() - 4;
-    int16_t barY = HEADER_HEIGHT + 2;
-    int16_t barHeight = canvas.height() - HEADER_HEIGHT - STATUS_HEIGHT - 4;
-    
-    canvas.drawRect(barX, barY, 3, barHeight, theme::BG_TERTIARY());
-    
-    size_t logSize = m_packetLog.size();
-    if (logSize > 0) {
-        int16_t thumbHeight = (LOG_VISIBLE_ROWS * barHeight) / logSize;
-        if (thumbHeight < 4) thumbHeight = 4;
-        
-        int16_t thumbY = barY + (m_packetLogScroll * barHeight) / logSize;
-        canvas.fillRect(barX, thumbY, 3, thumbHeight, theme::ACCENT());
-    }
-#else
-    (void)canvas;
 #endif
 }
 

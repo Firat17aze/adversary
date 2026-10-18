@@ -16,6 +16,8 @@
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "screen_interface.h"
 #include "sniffer_types.h"
 #include <cstdint>
@@ -146,8 +148,7 @@ private:
     void drawStats(Canvas& canvas);
     void drawChannelIndicator(Canvas& canvas, int16_t x, int16_t y);
     void drawPacketLog(Canvas& canvas);
-    void drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, int16_t y, bool selected);
-    void drawLogScrollbar(Canvas& canvas);
+    void drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, int16_t y);
     void drawActionMenu(Canvas& canvas);
     
     void addPacketToLog(const CapturedPacket& packet);
@@ -192,11 +193,12 @@ private:
     SnifferScreenState m_screenState;
     std::vector<PacketSummary> m_packetLog;
     size_t m_packetLogHead;
-    size_t m_packetLogSelection;
-    size_t m_packetLogScroll;
+    // Owns the packet-log selection + scroll window + wrap; drawPacketLog feeds it the live item
+    // count and viewport each frame, so cursor and scroll offset can't drift (slice-0062/0068).
+    ListScrollModel m_packetLogList;
     bool m_logPaused;
     // Snapshot of the packet the action menu was opened on. The menu acts on this copy, never on
-    // m_packetLog[m_packetLogSelection]: the ring overwrites entries in place and auto-scroll can
+    // m_packetLog[m_packetLogList.selectedIndex()]: the ring overwrites entries in place and auto-scroll can
     // move the selection while the menu is open, so a live index would target a different packet.
     PacketSummary m_selectedPacket;
 
@@ -209,8 +211,6 @@ private:
     bool m_deauthFloodAlert;
     
     static constexpr size_t PACKET_LOG_SIZE = 25; // Reduce from 50 (Save ~1.5KB)
-    static constexpr size_t LOG_VISIBLE_ROWS = 5;
-    static constexpr int16_t LOG_ROW_HEIGHT = 18;
     static constexpr uint32_t DEAUTH_FLOOD_THRESHOLD = 10;
     static constexpr uint32_t DEAUTH_WINDOW_MS = 1000;
     
