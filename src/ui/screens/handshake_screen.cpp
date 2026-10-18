@@ -1451,31 +1451,21 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
     canvas.setTextSize(1);
 
     // The shared component derives the visible-row count from the list rect, keeps the selection
-    // on screen, and draws the unified thumb in place of the old hand-rolled scrollbar; this
-    // callback paints one handshake row. Appearance kept verbatim (the bright ACCENT bar stays
-    // until the capstone unifies all lists, ledger item 93).
+    // on screen, draws the unified thumb, and paints the selection band (BG_SELECTED); this
+    // callback paints one handshake row's content only, in the band-only colour policy that is
+    // standard across every list (slice-0063, which retired this screen's old bright ACCENT bar).
     handshakeList_.setItemCount((int)sessionHandshakes_.size());
     ScrollableList::render(canvas, handshakeList_, 0, listY, canvas.width(), listHeight, itemHeight,
-        [this, itemHeight](Canvas& c, int idx, int16_t y, bool isSelected) {
+        [this](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
             const auto& hs = sessionHandshakes_[idx];
 
-            // Selection highlight
-            if (isSelected) {
-                c.fillRect(0, y - 1, c.width(), itemHeight, theme::ACCENT());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
-
-            // Type badge
-            const char* typeStr = utils::getHandshakeTypeString(hs);
+            // Type badge: brackets in primary text, the type itself in the accent colour.
             c.setCursor(4, y + 2);
+            c.setTextColor(theme::TEXT_PRIMARY());
             c.print("[");
-            if (isSelected) c.setTextColor(theme::SUCCESS());
-            else c.setTextColor(theme::ACCENT());
-            c.print(typeStr);
-            if (isSelected) c.setTextColor(theme::TEXT_PRIMARY());
-            else c.setTextColor(theme::TEXT_SECONDARY());
+            c.setTextColor(theme::ACCENT());
+            c.print(utils::getHandshakeTypeString(hs));
+            c.setTextColor(theme::TEXT_PRIMARY());
             c.print("]");
 
             // SSID

@@ -83,12 +83,9 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
     m_configList.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, m_configList, 0, FIRST_LINE_Y, canvas.width(), availableHeight,
         LINE_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
-            if (selected) {
-                c.fillRect(0, rowY, c.width(), LINE_HEIGHT, theme::BG_SECONDARY());
-                c.setTextColor(theme::ACCENT());
-            } else {
-                c.setTextColor(theme::TEXT_PRIMARY());
-            }
+            // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
+            // component (BG_SELECTED, dimmed on footer focus via the flag below) (slice-0063).
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
             c.setCursor(MARGIN_LEFT, rowY + 2);
             c.print(optionLabels[idx]);
 
@@ -100,7 +97,8 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
                 c.setCursor(80, rowY + 2);
                 c.print(val);
             }
-        });
+        },
+        !footerHints_.hasFocus());
 }
 
 void BleSpamScreen::drawAttack(Canvas& canvas) {

@@ -277,15 +277,10 @@ void DeauthScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, canvas.width(), footerY - y, lineHeight,
-        [this, &options, lineHeight](Canvas& c, int idx, int16_t rowY, bool selected) {
-            if (selected) {
-                // Dim highlight when the footer has focus.
-                uint16_t highlightColor = footerHints_.hasFocus()
-                    ? theme::BG_SECONDARY()
-                    : theme::BG_SELECTED();
-                c.fillRect(0, rowY, c.width(), lineHeight, highlightColor);
-            }
-
+        [&options](Canvas& c, int idx, int16_t rowY, bool selected) {
+            // Config field: the selected field reddens to ACCENT (the "editing this field" cue);
+            // the band is drawn by the component and dims when the footer holds focus, via the
+            // focused flag passed below (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
             c.setCursor(4, rowY + 2);
             c.print(options[idx].label);
@@ -294,7 +289,8 @@ void DeauthScreen::drawConfig(Canvas& canvas)
             int16_t valueWidth = strlen(options[idx].value) * 6;
             c.setCursor(c.width() - valueWidth - 4, rowY + 2);
             c.print(options[idx].value);
-        });
+        },
+        !footerHints_.hasFocus());
 
     drawFooter(canvas);
 #else

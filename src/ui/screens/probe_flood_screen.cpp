@@ -252,15 +252,9 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, screenWidth, footerY - y, lineHeight,
-        [this, &options, lineHeight, labelX, valueX](Canvas& c, int idx, int16_t rowY, bool selected) {
-            if (selected) {
-                // Dim highlight when the footer has focus.
-                uint16_t highlightColor = footerHints_.hasFocus()
-                    ? theme::BG_SECONDARY()
-                    : theme::BG_SELECTED();
-                c.fillRect(0, rowY, c.width(), lineHeight, highlightColor);
-            }
-
+        [&options, labelX, valueX](Canvas& c, int idx, int16_t rowY, bool selected) {
+            // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
+            // component and dimmed on footer focus via the focused flag below (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
 
             if (idx == CONFIG_OPTION_COUNT - 1) {
@@ -274,7 +268,8 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
                 c.setCursor(valueX, rowY + 2);
                 c.print(options[idx].value);
             }
-        });
+        },
+        !footerHints_.hasFocus());
 #else
     (void)canvas;
 #endif

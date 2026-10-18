@@ -1291,7 +1291,7 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
     // the input logic (moveUp/moveDown) and the renderer can't disagree on how many rows fit.
     fileList_.setItemCount((int)listSize);
     ScrollableList::render(canvas, fileList_, 0, y, screenWidth, VISIBLE_FILES * ROW_HEIGHT, ROW_HEIGHT,
-        [this, &summaries](Canvas& c, int i, int16_t rowY, bool selected) {
+        [this, &summaries](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
             // Get file data based on category
             static char fileNameBuf[64];  // Static buffer for derived filename
             const char* fileName = nullptr;
@@ -1314,12 +1314,8 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
                 fileSize = files_[i].size;
             }
 
-            // Only show list selection highlight when footer doesn't have focus. Uses the app-wide
-            // BG_SELECTED() standard (not the bright ACCENT bar this screen drew before slice-0062).
-            if (selected && !footerHints_.hasFocus()) {
-                c.fillRect(0, rowY, c.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            }
-
+            // Selection band drawn by the component; when the footer holds focus it dims the
+            // band to BG_SECONDARY via the focused flag passed below (slice-0063).
             int16_t textX = 4;
 
             // Draw status circles for handshakes (WPA-SEC) and wardriving (WiGLE)
@@ -1377,7 +1373,8 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
             c.print(formatSize(fileSize));
 
             // Type badge moved to FILE INFO screen to avoid metadata loading in list
-        });
+        },
+        !footerHints_.hasFocus());  // list focus dims to BG_SECONDARY when footer holds focus
 }
 
 void CapturesScreen::drawDeleteConfirm(Canvas& canvas) {

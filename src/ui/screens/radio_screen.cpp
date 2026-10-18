@@ -1077,14 +1077,12 @@ void RadioScreen::drawMain(Canvas& canvas) {
     // is sized to VISIBLE_ROWS so the on-screen row count is unchanged.
     mainList_.setItemCount(MAIN_ITEM_COUNT);
     ScrollableList::render(canvas, mainList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
-        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool selected) {
-            if (selected) {
-                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
-            c.setCursor(x, rowY);
+        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
+            // Band drawn by the component; text is content-coloured (slice-0063). The +2 centres
+            // the glyph in the LINE_HEIGHT band (the band used to sit at rowY-2, so text at rowY
+            // looked centred; the component draws it at the row rect, so the offset moves to text).
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(x, rowY + 2);
             c.print(MAIN_ITEMS[i]);
         });
 }
@@ -1150,14 +1148,11 @@ void RadioScreen::drawSignalList(Canvas& canvas) {
     }
     fileList_.setItemCount(static_cast<int>(signals_.size()));
     ScrollableList::render(canvas, fileList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
-        LINE_HEIGHT, [this, x](Canvas& c, int i, int16_t rowY, bool selected) {
-            if (selected) {
-                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
-            c.setCursor(x, rowY);
+        LINE_HEIGHT, [this, x](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
+            // Band drawn by the component; text is content-coloured (slice-0063). +2 centres the
+            // glyph in the band (was rowY-2 band + rowY text; now row-rect band + nudged text).
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(x, rowY + 2);
             c.printf("%.26s", signals_[i].name);
         });
 }
@@ -1311,14 +1306,11 @@ void RadioScreen::drawFskSelect(Canvas& canvas) {
     // on screen, and draws the unified thumb; this callback paints one preset row.
     fskList_.setItemCount(FSK_PRESET_COUNT);
     ScrollableList::render(canvas, fskList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
-        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool selected) {
-            if (selected) {
-                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
-            c.setCursor(x, rowY);
+        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
+            // Band drawn by the component; text is content-coloured (slice-0063). +2 centres the
+            // glyph in the band (was rowY-2 band + rowY text; now row-rect band + nudged text).
+            c.setTextColor(theme::TEXT_PRIMARY());
+            c.setCursor(x, rowY + 2);
             c.print(FSK_PRESETS[i].label);
         });
 }

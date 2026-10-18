@@ -117,8 +117,8 @@ private:
     void drawWriteSummary(Canvas& canvas);
     
     // Helper methods
-    void drawSectorListItem(Canvas& canvas, int16_t y, int sector, 
-                            const MifareSectorData& data, bool selected);
+    void drawSectorListItem(Canvas& canvas, int16_t y, int sector,
+                            const MifareSectorData& data);
     int getVisibleSummaryItems() const;
     int getDetailsContentHeight() const;
     

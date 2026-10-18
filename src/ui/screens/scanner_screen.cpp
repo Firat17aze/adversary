@@ -541,20 +541,16 @@ void ScannerScreen::drawNetworkEntry(Canvas& canvas, const NetworkInfo& net,
                                       int16_t y, bool selected) {
 #ifdef ESP32
     int16_t screenWidth = canvas.width();
-    
-    if (selected) {
-        canvas.fillRect(0, y, screenWidth, ENTRY_HEIGHT - 1, theme::BG_SELECTED());
-    }
-    
-    drawSignalBars(canvas, 4, y + 4, net.rssi, 
-                   selected ? theme::TEXT_PRIMARY() : theme::ACCENT());
-    
-    canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_PRIMARY());
+    (void)selected;  // selection band is drawn by ScrollableList; rows are content-coloured
+
+    drawSignalBars(canvas, 4, y + 4, net.rssi, theme::ACCENT());
+
+    canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setTextSize(1);
     canvas.setCursor(24, y + 4);
-    
+
     if (net.isHidden || net.ssid.empty()) {
-        canvas.setTextColor(selected ? theme::TEXT_SECONDARY() : theme::TEXT_DISABLED());
+        canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.print("<Hidden>");
     } else {
         if (net.ssid.length() > 18) {
@@ -565,9 +561,9 @@ void ScannerScreen::drawNetworkEntry(Canvas& canvas, const NetworkInfo& net,
         }
     }
     
-    canvas.setTextColor(selected ? theme::TEXT_SECONDARY() : theme::TEXT_DISABLED());
+    canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(24, y + 14);
-    
+
     char info[32];
     snprintf(info, sizeof(info), "CH:%02d %s %ddBm", 
              net.channel, net.getSecurityString(), net.rssi);

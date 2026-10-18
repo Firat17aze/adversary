@@ -6,9 +6,11 @@
  * pure ListScrollModel (so handleInput can drive it), and this renderer, each frame,
  *   1. derives the viewport height from the live layout rect — the single source of truth for
  *      how many rows fit, which the model's scroll window then honours;
- *   2. calls the screen's per-row draw callback for each visible item (row appearance stays
- *      with the screen — selection highlight, columns, colours);
- *   3. draws the one unified scrollbar thumb when the list is scrollable.
+ *   2. paints the selected row's band itself (BG_SELECTED when focused, BG_SECONDARY when the
+ *      screen's footer holds focus), so the selection highlight is identical on every list;
+ *   3. calls the screen's per-row draw callback for each visible item (the callback draws row
+ *      content only — columns, text, badges — never its own band);
+ *   4. draws the one unified scrollbar thumb when the list is scrollable.
  *
  * This replaces four divergent hand-rolled scrollbar idioms (thin bar, proportional thumb,
  * up/down triangles, "N/total" text) with a single proportional thumb. render() is a template
@@ -34,12 +36,17 @@ public:
      *                   by the screen); its viewport is set here from the rect.
      * @param x,y,w,h    the list content rect in canvas pixels.
      * @param rowHeight  pixel height of one row; visibleRows = h / rowHeight.
-     * @param drawRow    callback drawing one row: (canvas, itemIndex, rowTopY, isSelected).
+     * @param drawRow    callback drawing one row's content: (canvas, itemIndex, rowTopY,
+     *                   isSelected). The band under the selected row is drawn here, not in the
+     *                   callback; the callback must not fill its own selection band.
+     * @param focused    true when the list itself has input focus (selected band = BG_SELECTED);
+     *                   false when the screen's footer holds focus (band dims to BG_SECONDARY).
+     *                   Screens without a focusable footer leave the default.
      */
     template<typename Canvas, typename DrawRow>
     static void render(Canvas& canvas, ListScrollModel& model,
                        int16_t x, int16_t y, int16_t w, int16_t h,
-                       int16_t rowHeight, DrawRow drawRow);
+                       int16_t rowHeight, DrawRow drawRow, bool focused = true);
 };
 
 } // namespace adversary
@@ -54,16 +61,24 @@ namespace adversary {
 template<typename Canvas, typename DrawRow>
 void ScrollableList::render(Canvas& canvas, ListScrollModel& model,
                             int16_t x, int16_t y, int16_t w, int16_t h,
-                            int16_t rowHeight, DrawRow drawRow) {
+                            int16_t rowHeight, DrawRow drawRow, bool focused) {
     const int visibleRows = rowHeight > 0 ? h / rowHeight : 0;
     model.setViewport(visibleRows);
 
+    // The selection band is drawn here, once, for every list: BG_SELECTED when the list has
+    // focus, dimmed to BG_SECONDARY when the screen's footer does. The callback draws content
+    // on top and never paints its own band (slice-0063).
+    const uint16_t bandColor = focused ? theme::BG_SELECTED() : theme::BG_SECONDARY();
     const int offset = model.scrollOffset();
     const int selected = model.selectedIndex();
     for (int row = 0; row < visibleRows && (offset + row) < model.itemCount(); ++row) {
         const int itemIndex = offset + row;
         const int16_t rowTopY = y + static_cast<int16_t>(row * rowHeight);
-        drawRow(canvas, itemIndex, rowTopY, itemIndex == selected);
+        const bool isSelected = (itemIndex == selected);
+        if (isSelected) {
+            canvas.fillRect(x, rowTopY, w, rowHeight, bandColor);
+        }
+        drawRow(canvas, itemIndex, rowTopY, isSelected);
     }
 
     if (model.isScrollable()) {

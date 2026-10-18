@@ -640,19 +640,14 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     // The shared component derives the visible-row count from listHeight/itemHeight, keeps the
     // selection on screen, and draws the unified scrollbar; this callback only paints one row.
     ScrollableList::render(canvas, logList_, 0, listY, canvas.width(), listHeight, itemHeight,
-        [this, itemHeight](Canvas& c, int idx, int16_t y, bool isSelected) {
+        [this](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
             int bufferIdx = (logWriteIndex_ - 1 - idx + MAX_LOG_NETWORKS) % MAX_LOG_NETWORKS;
             const auto& net = networkLog_[bufferIdx];
             if (!net.valid) return;
 
-            if (isSelected) {
-                // BG_SELECTED is the app-wide selected-row style (scanner, deauth, ble/radio/…);
-                // wardriving used to draw a bright ACCENT bar, the lone outlier.
-                c.fillRect(0, y - 1, c.width(), itemHeight, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
+            // The component paints the selection band; row text is content-coloured, not
+            // selection-coloured (slice-0063 band-only policy for data lists).
+            c.setTextColor(theme::TEXT_PRIMARY());
 
             c.setCursor(4, y + 2);
             char ssid[17];

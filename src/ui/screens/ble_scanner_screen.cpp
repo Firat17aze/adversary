@@ -169,22 +169,17 @@ void BleScannerScreen::drawList(Canvas& canvas) {
     // is sized to ITEMS_PER_PAGE so the on-screen row count is unchanged.
     m_list.setItemCount((int)m_deviceList.size());
     ScrollableList::render(canvas, m_list, 0, startY, config::SCREEN_WIDTH, ITEMS_PER_PAGE * itemHeight,
-        itemHeight, [this, itemHeight](Canvas& c, int idx, int16_t y, bool selected) {
+        itemHeight, [this](Canvas& c, int idx, int16_t y, bool /*selected*/) {
             const auto& dev = m_deviceList[idx];
 
-            // Highlight selection - only if footer doesn't have focus
-            bool showAsSelected = selected && !footerHints_.hasFocus();
-            if (showAsSelected) {
-                c.fillRect(0, y, config::SCREEN_WIDTH, itemHeight, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_INVERSE());
-            } else {
-                c.setTextColor(theme::TEXT_PRIMARY());
-            }
+            // Band drawn by the component (BG_SELECTED, dimmed on footer focus via the flag
+            // below); row content is content-coloured, not selection-inverted (slice-0063).
+            c.setTextColor(theme::TEXT_PRIMARY());
 
             // Signal strength bar (simple)
             int rssiX = 5;
             int barW = map(constrain(dev.rssi, -100, -30), -100, -30, 2, 10);
-            c.fillRect(rssiX, y + 5, barW, 10, selected ? theme::TEXT_INVERSE() : theme::ACCENT());
+            c.fillRect(rssiX, y + 5, barW, 10, theme::ACCENT());
 
             // Name and MAC
             c.setCursor(20, y + 2);
@@ -201,7 +196,7 @@ void BleScannerScreen::drawList(Canvas& canvas) {
             }
 
             c.setTextSize(1);
-            c.setTextColor(selected ? theme::TEXT_INVERSE() : theme::TEXT_SECONDARY());
+            c.setTextColor(theme::TEXT_SECONDARY());
             c.setCursor(20, y + 12);
             c.print(ble::addressToString(dev.address).c_str());
 
@@ -217,7 +212,8 @@ void BleScannerScreen::drawList(Canvas& canvas) {
                 c.setCursor(config::SCREEN_WIDTH - 30, y + 12);
                 c.print("[FP]");
             }
-        });
+        },
+        !footerHints_.hasFocus());
 }
 
 void BleScannerScreen::drawFooter(Canvas& canvas) {

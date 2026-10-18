@@ -1020,19 +1020,11 @@ int RfidScreen::getVisibleSummaryItems() const {
     return availableHeight / theme::LIST_ITEM_HEIGHT;
 }
 
-void RfidScreen::drawSectorListItem(Canvas& canvas, int16_t y, int sector, 
-                                     const MifareSectorData& data, bool selected) {
-    int16_t x = 10;
-    
-    // Selection indicator
-    if (selected) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(x, y + 4);
-        canvas.print(">");
-    }
-    
-    x += 12;
-    
+void RfidScreen::drawSectorListItem(Canvas& canvas, int16_t y, int sector,
+                                     const MifareSectorData& data) {
+    // Selection is signalled by the component-drawn band (slice-0063); no ">" cursor here.
+    int16_t x = 22;
+
     // Sector number
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(x, y + 4);
@@ -1055,14 +1047,8 @@ void RfidScreen::drawSectorListItem(Canvas& canvas, int16_t y, int sector,
     canvas.print("B");
     canvas.setTextColor(data.keyBFound ? theme::SUCCESS() : theme::ERROR());
     canvas.print(data.keyBFound ? "+" : "-");
-    
-    // If a key was found, show which one
-    if (data.keyAFound && selected) {
-        x += 25;
-        canvas.setTextColor(theme::TEXT_DISABLED());
-        canvas.setCursor(x, y + 4);
-        canvas.print(RfidAudit::getKeyName(data.keyAIndex));
-    }
+    // The cracked key name for the selected sector lives on the sector-detail screen (Enter);
+    // the summary row stays uncluttered now the band alone marks the selection (slice-0063).
 }
 
 void RfidScreen::drawAuditSummary(Canvas& canvas) {
@@ -1096,8 +1082,8 @@ void RfidScreen::drawAuditSummary(Canvas& canvas) {
     canvas.drawFastHLine(x, y, config::SCREEN_WIDTH - 20, theme::BG_SECONDARY());
     y += 6;
     
-    // Sector list. The shared component owns the scroll window + thumb; this lambda keeps the
-    // row appearance (selection band + the per-sector key columns) verbatim.
+    // Sector list. The shared component owns the scroll window, thumb, and selection band; this
+    // lambda paints one sector row's key columns (slice-0063).
     int16_t listY = y;
     int visibleItems = getVisibleSummaryItems();
 
@@ -1105,13 +1091,9 @@ void RfidScreen::drawAuditSummary(Canvas& canvas) {
     ScrollableList::render(
         canvas, summaryList_, 0, listY, config::SCREEN_WIDTH,
         visibleItems * theme::LIST_ITEM_HEIGHT, theme::LIST_ITEM_HEIGHT,
-        [this, &results](Canvas& c, int sector, int16_t itemY, bool selected) {
-            if (selected) {
-                c.fillRect(4, itemY, config::SCREEN_WIDTH - 8, theme::LIST_ITEM_HEIGHT,
-                           theme::BG_SECONDARY());
-            }
+        [this, &results](Canvas& c, int sector, int16_t itemY, bool /*selected*/) {
             if ((size_t)sector < results.size()) {
-                drawSectorListItem(c, itemY, sector, results[sector], selected);
+                drawSectorListItem(c, itemY, sector, results[sector]);
             }
         });
 
@@ -1339,13 +1321,10 @@ void RfidScreen::drawWritePick(Canvas& canvas) {
     ScrollableList::render(
         canvas, writeFileList_, 0, listTop, screenW,
         WRITE_PICK_VISIBLE_ROWS * theme::LIST_ITEM_HEIGHT, theme::LIST_ITEM_HEIGHT,
-        [this, x, screenW](Canvas& c, int idx, int16_t itemY, bool selected) {
-            if (selected) {
-                c.fillRect(0, itemY, screenW, theme::LIST_ITEM_HEIGHT, theme::BG_SECONDARY());
-                c.setTextColor(theme::ACCENT());
-            } else {
-                c.setTextColor(theme::TEXT_PRIMARY());
-            }
+        [this, x](Canvas& c, int idx, int16_t itemY, bool /*selected*/) {
+            // Band drawn by the component; filename is content-coloured (slice-0063). This is a
+            // file picker (a data list), so it uses the band-only standard, not the config ACCENT.
+            c.setTextColor(theme::TEXT_PRIMARY());
             c.setCursor(x, itemY + 6);
             c.print(m_writeFiles[idx].c_str());
         });

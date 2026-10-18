@@ -194,14 +194,10 @@ void WhitelistScreen::drawList(Canvas& canvas) {
     int16_t listHeight = canvas.height() - y - ui::FOOTER_HEIGHT;
     entryList_.setItemCount((int)entries_.size());
     ScrollableList::render(canvas, entryList_, 0, y, canvas.width(), listHeight, ROW_HEIGHT,
-        [this](Canvas& c, int idx, int16_t rowY, bool selected) {
+        [this](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
             const auto& entry = entries_[idx];
-            if (selected) {
-                c.fillRect(0, rowY, c.width(), ROW_HEIGHT, theme::BG_SELECTED());
-                c.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                c.setTextColor(theme::TEXT_SECONDARY());
-            }
+            // Selection band drawn by the component; text is content-coloured (slice-0063).
+            c.setTextColor(theme::TEXT_PRIMARY());
 
             c.setCursor(8, rowY + 1);
 
