@@ -22,8 +22,6 @@ KarmaScreen::KarmaScreen()
     , shouldExit_(false)
     , probeScrollPos_(0)
     , credentialScrollPos_(0)
-    , clientScrollPos_(0)
-    , selectedClientIdx_(0)
     , trafficScrollPos_(0)
     , configSelection_(0)
     , configMode_(1)
@@ -317,8 +315,8 @@ bool KarmaScreen::handleInput(char key) {
             if (screenState_ == KarmaScreenState::SNIFFER) {
                 previousState_ = screenState_;
                 screenState_ = KarmaScreenState::CLIENTS;
-                clientScrollPos_ = 0;
-                selectedClientIdx_ = 0;
+                clientList_.setItemCount((int)TrafficProxy::getInstance().getClientMacList().size());
+                clientList_.setSelectedIndex(0);
                 return true;
             }
             if (screenState_ == KarmaScreenState::ACTIVE) {
@@ -342,9 +340,13 @@ bool KarmaScreen::handleInput(char key) {
                 credentialScrollPos_--;
                 return true;
             }
-            if (screenState_ == KarmaScreenState::CLIENTS && selectedClientIdx_ > 0) {
-                selectedClientIdx_--;
-                return true;
+            if (screenState_ == KarmaScreenState::CLIENTS) {
+                auto macs = TrafficProxy::getInstance().getClientMacList();
+                if (!macs.empty()) {
+                    clientList_.setItemCount((int)macs.size());
+                    clientList_.moveUp();
+                    return true;
+                }
             }
             if (screenState_ == KarmaScreenState::CLIENT_TRAFFIC && trafficScrollPos_ > 0) {
                 trafficScrollPos_--;
@@ -373,8 +375,9 @@ bool KarmaScreen::handleInput(char key) {
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
                 auto macs = TrafficProxy::getInstance().getClientMacList();
-                if (macs.size() > 0 && selectedClientIdx_ < macs.size() - 1) {
-                    selectedClientIdx_++;
+                if (!macs.empty()) {
+                    clientList_.setItemCount((int)macs.size());
+                    clientList_.moveDown();
                     return true;
                 }
             }
@@ -394,8 +397,9 @@ bool KarmaScreen::handleInput(char key) {
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
                 auto macs = TrafficProxy::getInstance().getClientMacList();
-                if (selectedClientIdx_ < macs.size()) {
-                    selectedClientMac_ = macs[selectedClientIdx_];
+                size_t idx = (size_t)clientList_.selectedIndex();
+                if (idx < macs.size()) {
+                    selectedClientMac_ = macs[idx];
                     screenState_ = KarmaScreenState::CLIENT_DETAILS;
                     return true;
                 }
@@ -822,41 +826,29 @@ void KarmaScreen::renderClients(Canvas& canvas) {
     char centerStr[16];
     snprintf(centerStr, sizeof(centerStr), "%zu clients", macs.size());
     ui::StatusBar::render(canvas, "Clients", centerStr);
-    
-    int16_t y = 28;
-    const int maxVisible = 5;
-    int16_t screenWidth = canvas.width();
-    
+
     if (macs.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(10, 50);
         canvas.print("No clients connected");
     } else {
-        for (size_t i = clientScrollPos_; 
-             i < macs.size() && i < clientScrollPos_ + maxVisible; 
-             i++) {
-            bool selected = (i == selectedClientIdx_);
-            
-            if (selected) {
-                canvas.fillRect(0, y - 2, screenWidth, 18, theme::BG_SECONDARY());
-                canvas.setTextColor(theme::ACCENT());
-            } else {
-                canvas.setTextColor(theme::TEXT_PRIMARY());
-            }
-            
-            canvas.setCursor(10, y);
-            canvas.print(macs[i].c_str());
-            
-            auto* client = TrafficProxy::getInstance().getClientByMac(macs[i].c_str());
-            if (client) {
-                canvas.setTextColor(theme::TEXT_SECONDARY());
-                canvas.printf(" (%zu pkts)", client->entries.size());
-            }
-            
-            y += 18;
-        }
+        const int16_t listTop = 22; // status bar is 20px; 2px padding
+        const int16_t listH   = (int16_t)(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listTop);
+        clientList_.setItemCount((int)macs.size());
+        ScrollableList::render(canvas, clientList_, 0, listTop, config::SCREEN_WIDTH, listH,
+            theme::LIST_ROW_HEIGHT, [&macs](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
+                c.setTextColor(theme::TEXT_PRIMARY());
+                c.setCursor(10, rowY + 2);
+                c.print(macs[idx].c_str());
+                auto* client = TrafficProxy::getInstance().getClientByMac(macs[idx].c_str());
+                if (client) {
+                    c.setTextColor(theme::TEXT_SECONDARY());
+                    c.printf(" (%zu pkts)", client->entries.size());
+                }
+            },
+            !footerHints_.hasFocus());
     }
-    
+
     // Footer hints
     footerHints_.setHints({
         {'\r', "Details", !macs.empty()},

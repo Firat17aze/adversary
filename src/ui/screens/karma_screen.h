@@ -16,6 +16,8 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "screen_interface.h"
 #include "config/config.h"
 #include <string>
@@ -112,9 +114,10 @@ private:
     // Scroll positions
     size_t probeScrollPos_ = 0;
     size_t credentialScrollPos_ = 0;
-    size_t clientScrollPos_ = 0;
-    size_t selectedClientIdx_ = 0;
-    std::string selectedClientMac_;
+    // Owns the clients-list selection + scroll window + wrap; renderClients feeds it the live
+    // viewport each frame so cursor and scroll offset can't drift (slice-0062/0067).
+    ListScrollModel clientList_;
+    std::string selectedClientMac_; // snapshotted from the list at Enter; downstream key
     size_t trafficScrollPos_ = 0;
     
     // Config options
