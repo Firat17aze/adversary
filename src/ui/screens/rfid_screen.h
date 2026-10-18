@@ -12,6 +12,8 @@
 #include "hal/rfid/rfid_dump.h"
 #include "hal/rfid/rfid_writer.h"
 #include "ui/components/text_input_popup.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include <string>
 #include <vector>
 
@@ -71,9 +73,10 @@ private:
     float m_auditProgress;
     int m_keysFound;
     
-    // Audit summary navigation
-    int8_t m_summaryScroll;      // Scroll position in summary list
-    int8_t m_summarySelection;   // Selected sector in summary
+    // Audit summary navigation. The shared model owns selection + scroll window + wrap; the
+    // 16 MIFARE-Classic sectors are a fixed count but overflow the viewport, so this is a
+    // genuine scrolling selection list (slice-0062).
+    ListScrollModel summaryList_;
     uint32_t m_auditStartMs;     // For elapsed time tracking
     
     // Details screen scrolling
@@ -87,8 +90,9 @@ private:
     // Write/restore flow (slice-0043)
     static bool s_writeModeRequested;      // One-shot launch intent from the menu dispatcher
     std::vector<std::string> m_writeFiles; // .nfc dumps available under the RFID captures dir
-    int8_t m_writeFileSelection;
-    int8_t m_writeFileScroll;
+    // The shared model owns selection + scroll window + wrap; drawWritePick feeds it the live
+    // viewport each frame so the two can't drift (slice-0062).
+    ListScrollModel writeFileList_;
     NfcDump m_writeDump;                    // Parsed dump for the chosen file
     WritePlan m_writePlan;                  // Blocks the restore will write
     WriteResult m_writeResult;              // Outcome, shown on WRITE_SUMMARY

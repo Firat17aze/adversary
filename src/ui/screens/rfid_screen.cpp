@@ -19,6 +19,8 @@ constexpr const char* RFID_CAPTURES_DIR = "/adversary/captures/RFID";
 // Rows the write-dump picker shows at once. Sized for its own layout (list starts just under the
 // status bar), not the taller audit-summary header getVisibleSummaryItems() assumes (slice-0043).
 constexpr int WRITE_PICK_VISIBLE_ROWS = 5;
+// A MIFARE Classic 1K card has 16 sectors; the audit summary always lists exactly this many.
+constexpr int MIFARE_1K_SECTORS = 16;
 }
 
 bool RfidScreen::s_writeModeRequested = false;
@@ -32,14 +34,10 @@ RfidScreen::RfidScreen()
     , m_state(State::IDLE)
     , m_auditProgress(0.0f)
     , m_keysFound(0)
-    , m_summaryScroll(0)
-    , m_summarySelection(0)
     , m_auditStartMs(0)
     , m_detailsScroll(0)
     , m_promptSelection(0)
     , m_readDataOption(false)
-    , m_writeFileSelection(0)
-    , m_writeFileScroll(0)
     , m_writeIncludeUid(false)
     , m_writeFromMenu(false)
     , m_writePromptSelection(0)
@@ -558,26 +556,18 @@ bool RfidScreen::handleInput(char key) {
     if (m_state == State::WRITE_PICK) {
         switch (key) {
             case ';':
-                if (m_writeFileSelection > 0) {
-                    m_writeFileSelection--;
-                    if (m_writeFileSelection < m_writeFileScroll) {
-                        m_writeFileScroll = m_writeFileSelection;
-                    }
-                    m_needsRedraw = true;
-                }
+                writeFileList_.setItemCount((int)m_writeFiles.size());
+                writeFileList_.moveUp();
+                m_needsRedraw = true;
                 return true;
             case '.':
-                if (m_writeFileSelection < (int)m_writeFiles.size() - 1) {
-                    m_writeFileSelection++;
-                    if (m_writeFileSelection >= m_writeFileScroll + WRITE_PICK_VISIBLE_ROWS) {
-                        m_writeFileScroll = m_writeFileSelection - WRITE_PICK_VISIBLE_ROWS + 1;
-                    }
-                    m_needsRedraw = true;
-                }
+                writeFileList_.setItemCount((int)m_writeFiles.size());
+                writeFileList_.moveDown();
+                m_needsRedraw = true;
                 return true;
             case '\n':
                 if (!m_writeFiles.empty() &&
-                    loadWriteDump(m_writeFiles[m_writeFileSelection])) {
+                    loadWriteDump(m_writeFiles[writeFileList_.selectedIndex()])) {
                     m_state = State::WRITE_PROMPT;
                     m_writePromptSelection = 0;
                     footerHints_.setHints({
@@ -653,26 +643,17 @@ bool RfidScreen::handleInput(char key) {
     if (m_state == State::AUDIT_SUMMARY) {
         switch (key) {
             case ';':  // Up
-                if (m_summarySelection > 0) {
-                    m_summarySelection--;
-                    if (m_summarySelection < m_summaryScroll) {
-                        m_summaryScroll--;
-                    }
-                    m_needsRedraw = true;
-                }
+                summaryList_.setItemCount(MIFARE_1K_SECTORS);
+                summaryList_.moveUp();
+                m_needsRedraw = true;
                 return true;
-                
+
             case '.':  // Down
-                if (m_summarySelection < 15) {
-                    m_summarySelection++;
-                    int visible = getVisibleSummaryItems();
-                    if (m_summarySelection >= m_summaryScroll + visible) {
-                        m_summaryScroll++;
-                    }
-                    m_needsRedraw = true;
-                }
+                summaryList_.setItemCount(MIFARE_1K_SECTORS);
+                summaryList_.moveDown();
+                m_needsRedraw = true;
                 return true;
-                
+
             case '\n':  // Enter - view sector detail
                 m_state = State::SECTOR_DETAIL;
                 footerHints_.setHints({
@@ -830,8 +811,8 @@ void RfidScreen::startAudit() {
 void RfidScreen::onAuditComplete() {
     // Go to summary screen instead of result
     m_state = State::AUDIT_SUMMARY;
-    m_summaryScroll = 0;
-    m_summarySelection = 0;
+    summaryList_.setItemCount(MIFARE_1K_SECTORS);
+    summaryList_.setSelectedIndex(0);
     m_needsRedraw = true;
     
     char msg[32];
@@ -1115,34 +1096,37 @@ void RfidScreen::drawAuditSummary(Canvas& canvas) {
     canvas.drawFastHLine(x, y, config::SCREEN_WIDTH - 20, theme::BG_SECONDARY());
     y += 6;
     
-    // Sector list
+    // Sector list. The shared component owns the scroll window + thumb; this lambda keeps the
+    // row appearance (selection band + the per-sector key columns) verbatim.
     int16_t listY = y;
     int visibleItems = getVisibleSummaryItems();
-    
-    for (int i = 0; i < visibleItems && (m_summaryScroll + i) < 16; i++) {
-        int sector = m_summaryScroll + i;
-        int16_t itemY = listY + (i * theme::LIST_ITEM_HEIGHT);
-        bool selected = (sector == m_summarySelection);
-        
-        if (selected) {
-            canvas.fillRect(4, itemY, config::SCREEN_WIDTH - 8, theme::LIST_ITEM_HEIGHT, theme::BG_SECONDARY());
-        }
-        
-        if ((size_t)sector < results.size()) {
-            drawSectorListItem(canvas, itemY, sector, results[sector], selected);
-        }
-    }
-    
+
+    summaryList_.setItemCount(MIFARE_1K_SECTORS);
+    ScrollableList::render(
+        canvas, summaryList_, 0, listY, config::SCREEN_WIDTH,
+        visibleItems * theme::LIST_ITEM_HEIGHT, theme::LIST_ITEM_HEIGHT,
+        [this, &results](Canvas& c, int sector, int16_t itemY, bool selected) {
+            if (selected) {
+                c.fillRect(4, itemY, config::SCREEN_WIDTH - 8, theme::LIST_ITEM_HEIGHT,
+                           theme::BG_SECONDARY());
+            }
+            if ((size_t)sector < results.size()) {
+                drawSectorListItem(c, itemY, sector, results[sector], selected);
+            }
+        });
+
     // Scroll indicator
     char rightContent[8];
-    snprintf(rightContent, sizeof(rightContent), "%d/16", m_summarySelection + 1);
+    snprintf(rightContent, sizeof(rightContent), "%d/%d",
+             summaryList_.selectedIndex() + 1, MIFARE_1K_SECTORS);
     footerHints_.setRightContent(rightContent);
 }
 
 void RfidScreen::drawSectorDetail(Canvas& canvas) {
-    if ((size_t)m_summarySelection >= m_audit->getResults().size()) return;
-    
-    const auto& data = m_audit->getResults()[m_summarySelection];
+    const int selectedSector = summaryList_.selectedIndex();
+    if ((size_t)selectedSector >= m_audit->getResults().size()) return;
+
+    const auto& data = m_audit->getResults()[selectedSector];
     
     char title[16];
     snprintf(title, sizeof(title), "Sector %02d", data.sector);
@@ -1225,8 +1209,7 @@ void RfidScreen::drawSectorDetail(Canvas& canvas) {
 
 void RfidScreen::enterWritePick() {
     m_writeFiles.clear();
-    m_writeFileSelection = 0;
-    m_writeFileScroll = 0;
+    writeFileList_.setItemCount(0);
 
     File dir = SD.open(RFID_CAPTURES_DIR);
     if (dir && dir.isDirectory()) {
@@ -1346,41 +1329,33 @@ void RfidScreen::drawWritePick(Canvas& canvas) {
         return;
     }
 
-    // List starts right under the status bar; show WRITE_PICK_VISIBLE_ROWS at a time and scroll.
+    // List starts right under the status bar; the shared component shows WRITE_PICK_VISIBLE_ROWS
+    // rows at a time, scrolls, and draws the thumb when the dumps overflow the window (this
+    // replaced the hand-rolled up/down scroll triangles).
     const int16_t listTop = config::STATUS_BAR_HEIGHT + 2;
     const int total = static_cast<int>(m_writeFiles.size());
-    int endIndex = m_writeFileScroll + WRITE_PICK_VISIBLE_ROWS;
-    if (endIndex > total) endIndex = total;
 
-    for (int i = m_writeFileScroll; i < endIndex; i++) {
-        int16_t itemY = listTop + (i - m_writeFileScroll) * theme::LIST_ITEM_HEIGHT;
-        bool selected = (i == m_writeFileSelection);
-        if (selected) {
-            canvas.fillRect(0, itemY, screenW, theme::LIST_ITEM_HEIGHT, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        canvas.setCursor(x, itemY + 6);
-        canvas.print(m_writeFiles[i].c_str());
-    }
-
-    // Scroll arrows (mirroring scanner_screen): more dumps above / below the window.
-    if (m_writeFileScroll > 0) {
-        canvas.fillTriangle(screenW - 8, listTop + 4, screenW - 12, listTop + 10,
-                            screenW - 4, listTop + 10, theme::ACCENT());
-    }
-    if (endIndex < total) {
-        int16_t bottomY = config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - 4;
-        canvas.fillTriangle(screenW - 8, bottomY, screenW - 12, bottomY - 6,
-                            screenW - 4, bottomY - 6, theme::ACCENT());
-    }
+    writeFileList_.setItemCount(total);
+    ScrollableList::render(
+        canvas, writeFileList_, 0, listTop, screenW,
+        WRITE_PICK_VISIBLE_ROWS * theme::LIST_ITEM_HEIGHT, theme::LIST_ITEM_HEIGHT,
+        [this, x, screenW](Canvas& c, int idx, int16_t itemY, bool selected) {
+            if (selected) {
+                c.fillRect(0, itemY, screenW, theme::LIST_ITEM_HEIGHT, theme::BG_SECONDARY());
+                c.setTextColor(theme::ACCENT());
+            } else {
+                c.setTextColor(theme::TEXT_PRIMARY());
+            }
+            c.setCursor(x, itemY + 6);
+            c.print(m_writeFiles[idx].c_str());
+        });
 
     // char[8] truncated the "N/M" counter once the file count reached 4 digits
     // (e.g. "1000/1000" -> "1000/10"). Sized for the worst case of two 32-bit %d plus
     // '/' and NUL (24); interim until the shared count formatter lands (see issue #54).
     char rightContent[24];
-    snprintf(rightContent, sizeof(rightContent), "%d/%d", m_writeFileSelection + 1, total);
+    snprintf(rightContent, sizeof(rightContent), "%d/%d",
+             writeFileList_.selectedIndex() + 1, total);
     footerHints_.setRightContent(rightContent);
 }
 
