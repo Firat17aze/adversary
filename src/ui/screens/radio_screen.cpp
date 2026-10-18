@@ -127,6 +127,17 @@ bool listNav(char key, int& selection, int count, int& scroll, int visible) {
     return true;
 }
 
+// listNav's equivalent for a list backed by the shared ListScrollModel: the model owns the
+// selection + scroll window + wrap, so this just routes the up/down keys. Returns true if the
+// key was a nav key (matching listNav so call sites stay identical).
+bool modelNav(char key, ListScrollModel& model, int count) {
+    if (key != ';' && key != '.') return false;
+    model.setItemCount(count);
+    if (key == ';') model.moveUp();
+    else model.moveDown();
+    return true;
+}
+
 }  // namespace
 
 RadioScreen::RadioScreen()
@@ -137,15 +148,9 @@ RadioScreen::RadioScreen()
     , state_(MenuState::RADIO_SELECT)
     , lastHintState_(MenuState::RADIO_SELECT)
     , radioSelection_(0)
-    , mainSelection_(0)
-    , mainScroll_(0)
     , presetIndex_(DEFAULT_PRESET)
-    , fskPresetIndex_(0)
-    , fskScroll_(0)
     , captureIsFsk_(false)
     , actionSelection_(0)
-    , fileSelection_(0)
-    , fileScroll_(0)
     , captureStage_(0)
     , jamModeSel_(0)
     , jamArmed_(false)
@@ -174,7 +179,7 @@ void RadioScreen::show() {
     needsRedraw_ = true;
     state_ = MenuState::RADIO_SELECT;
     radioSelection_ = 0;
-    mainSelection_ = 0;
+    mainList_.setItemCount(0);
     captureStage_ = 0;
 
     available_ = (hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio) &&
@@ -259,7 +264,7 @@ bool RadioScreen::captureSignal(rf::OokSignal& out) {
     // OOK and FSK share the RMT edge-timing path (the FSK demod drives GDO0 with a
     // recovered NRZ line just as the OOK slicer does); only the radio config and the
     // stored descriptor differ. captureIsFsk_ is set when the operator enters.
-    const FskPreset& fsk = FSK_PRESETS[fskPresetIndex_];
+    const FskPreset& fsk = FSK_PRESETS[fskList_.selectedIndex()];
     const double mhz = captureIsFsk_ ? fsk.mhz : currentFreqMHz();
     bool ok = false;
     if (captureIsFsk_) {
@@ -449,11 +454,11 @@ void RadioScreen::loadActionSignal() {
     // failure is non-fatal (the actions still work; replay re-reads with its own
     // guards), so we only flag it and let the draw fall back to a placeholder.
     actionSignalValid_ = false;
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(signals_.size())) {
+    if (fileList_.selectedIndex() < 0 || fileList_.selectedIndex() >= static_cast<int>(signals_.size())) {
         return;
     }
     char path[128];
-    fullPath(signals_[fileSelection_].name, path, sizeof(path));
+    fullPath(signals_[fileList_.selectedIndex()].name, path, sizeof(path));
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
@@ -469,12 +474,12 @@ void RadioScreen::loadActionSignal() {
 
 void RadioScreen::replaySelected() {
 #ifdef ESP32
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(signals_.size())) {
+    if (fileList_.selectedIndex() < 0 || fileList_.selectedIndex() >= static_cast<int>(signals_.size())) {
         state_ = MenuState::SIGNAL_LIST;
         return;
     }
     char path[128];
-    fullPath(signals_[fileSelection_].name, path, sizeof(path));
+    fullPath(signals_[fileList_.selectedIndex()].name, path, sizeof(path));
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
@@ -504,20 +509,18 @@ void RadioScreen::replaySelected() {
 
 void RadioScreen::deleteSelected() {
 #ifdef ESP32
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(signals_.size())) {
+    if (fileList_.selectedIndex() < 0 || fileList_.selectedIndex() >= static_cast<int>(signals_.size())) {
         state_ = MenuState::SIGNAL_LIST;
         return;
     }
     char path[128];
-    fullPath(signals_[fileSelection_].name, path, sizeof(path));
+    fullPath(signals_[fileList_.selectedIndex()].name, path, sizeof(path));
     if (SD.remove(path)) showSuccessToast("Deleted");
     else showErrorToast("Delete failed");
 
     loadSignalList();
-    if (fileSelection_ >= static_cast<int>(signals_.size())) {
-        fileSelection_ = signals_.empty() ? 0 : static_cast<int>(signals_.size()) - 1;
-    }
-    fileScroll_ = 0;
+    // The model clamps the selection onto the shrunk list and keeps it on screen.
+    fileList_.setItemCount(static_cast<int>(signals_.size()));
     state_ = MenuState::SIGNAL_LIST;
     needsRedraw_ = true;
 #endif
@@ -693,8 +696,7 @@ bool RadioScreen::handleInput(char key) {
             if (listNav(key, radioSelection_, 2, unusedScroll, 2)) return true;
             if (key == '\n' || key == '\r') {
                 if (radioSelection_ == 0) {
-                    mainSelection_ = 0;
-                    mainScroll_ = 0;
+                    mainList_.setItemCount(0);  // start at the top of the console menu
                     state_ = MenuState::MAIN;  // CC1101 Sub-GHz console
                 } else {
                     startNrfScan();  // NRF24 2.4 GHz analyzer
@@ -705,19 +707,17 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::MAIN:
-            if (listNav(key, mainSelection_, MAIN_ITEM_COUNT, mainScroll_,
-                        VISIBLE_ROWS)) {
+            if (modelNav(key, mainList_, MAIN_ITEM_COUNT)) {
                 return true;
             }
             if (key == '\n' || key == '\r') {
-                switch (mainSelection_) {
+                switch (mainList_.selectedIndex()) {
                     case MAIN_CAPTURE:
                         captureIsFsk_ = false;
                         startCapture();
                         break;
                     case MAIN_FSK_CAPTURE:
-                        fskPresetIndex_ = 0;
-                        fskScroll_ = 0;
+                        fskList_.setItemCount(0);  // start at the top of the preset list
                         state_ = MenuState::FSK_SELECT;
                         break;
                     case MAIN_BAND_SWEEP:
@@ -725,8 +725,8 @@ bool RadioScreen::handleInput(char key) {
                         break;
                     case MAIN_SAVED:
                         loadSignalList();
-                        fileSelection_ = 0;
-                        fileScroll_ = 0;
+                        fileList_.setItemCount(static_cast<int>(signals_.size()));
+                        fileList_.setSelectedIndex(0);  // start at the top of the saved list
                         state_ = MenuState::SIGNAL_LIST;
                         break;
                     case MAIN_FREQUENCY:
@@ -757,8 +757,7 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::SIGNAL_LIST:
-            if (listNav(key, fileSelection_, static_cast<int>(signals_.size()),
-                        fileScroll_, VISIBLE_ROWS)) {
+            if (modelNav(key, fileList_, static_cast<int>(signals_.size()))) {
                 return true;
             }
             if ((key == '\n' || key == '\r') && !signals_.empty()) {
@@ -798,8 +797,7 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::FSK_SELECT:
-            if (listNav(key, fskPresetIndex_, FSK_PRESET_COUNT, fskScroll_,
-                        VISIBLE_ROWS)) {
+            if (modelNav(key, fskList_, FSK_PRESET_COUNT)) {
                 return true;
             }
             if (key == '\n' || key == '\r') {
@@ -1074,20 +1072,21 @@ void RadioScreen::drawMain(Canvas& canvas) {
     canvas.printf("CC1101  %s", PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
 
-    // Scrolled window (the menu is taller than the space above the footer).
-    const int end = (mainScroll_ + VISIBLE_ROWS < MAIN_ITEM_COUNT)
-                        ? mainScroll_ + VISIBLE_ROWS : MAIN_ITEM_COUNT;
-    for (int i = mainScroll_; i < end; ++i) {
-        if (i == mainSelection_) {
-            canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
-        canvas.print(MAIN_ITEMS[i]);
-        y += LINE_HEIGHT;
-    }
+    // The shared component derives the visible-row count from the list rect, keeps the selection
+    // on screen, and draws the unified thumb; this callback paints one menu row. The render rect
+    // is sized to VISIBLE_ROWS so the on-screen row count is unchanged.
+    mainList_.setItemCount(MAIN_ITEM_COUNT);
+    ScrollableList::render(canvas, mainList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
+        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool selected) {
+            if (selected) {
+                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+            c.setCursor(x, rowY);
+            c.print(MAIN_ITEMS[i]);
+        });
 }
 
 void RadioScreen::drawCapturing(Canvas& canvas) {
@@ -1096,7 +1095,7 @@ void RadioScreen::drawCapturing(Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.setTextColor(theme::SUCCESS());
     canvas.setCursor(x, y);
-    canvas.printf("Listening  %s", captureIsFsk_ ? FSK_PRESETS[fskPresetIndex_].label
+    canvas.printf("Listening  %s", captureIsFsk_ ? FSK_PRESETS[fskList_.selectedIndex()].label
                                                  : PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
     canvas.setTextColor(theme::TEXT_SECONDARY());
@@ -1149,19 +1148,18 @@ void RadioScreen::drawSignalList(Canvas& canvas) {
         canvas.print("No saved signals");
         return;
     }
-    int end = fileScroll_ + VISIBLE_ROWS;
-    if (end > static_cast<int>(signals_.size())) end = static_cast<int>(signals_.size());
-    for (int i = fileScroll_; i < end; ++i) {
-        if (i == fileSelection_) {
-            canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
-        canvas.printf("%.26s", signals_[i].name);
-        y += LINE_HEIGHT;
-    }
+    fileList_.setItemCount(static_cast<int>(signals_.size()));
+    ScrollableList::render(canvas, fileList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
+        LINE_HEIGHT, [this, x](Canvas& c, int i, int16_t rowY, bool selected) {
+            if (selected) {
+                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+            c.setCursor(x, rowY);
+            c.printf("%.26s", signals_[i].name);
+        });
 }
 
 void RadioScreen::drawSignalAction(Canvas& canvas) {
@@ -1170,7 +1168,7 @@ void RadioScreen::drawSignalAction(Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.setTextColor(theme::ACCENT());
     canvas.setCursor(x, y);
-    canvas.printf("%.26s", signals_[fileSelection_].name);
+    canvas.printf("%.26s", signals_[fileList_.selectedIndex()].name);
     y += LINE_HEIGHT + 2;
 
     const char* items[2] = {"Replay", "Delete"};
@@ -1207,7 +1205,7 @@ void RadioScreen::drawConfirm(Canvas& canvas, const char* question, uint16_t acc
     y += LINE_HEIGHT + 2;
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(x, y);
-    canvas.printf("%.26s", signals_[fileSelection_].name);
+    canvas.printf("%.26s", signals_[fileList_.selectedIndex()].name);
     // The Yes/No/Cancel actions live in the footer hints (updateFooterHints).
 }
 
@@ -1309,20 +1307,20 @@ void RadioScreen::drawFskSelect(Canvas& canvas) {
     canvas.print("FSK modem preset");
     y += LINE_HEIGHT + 2;
 
-    // Scrolled window (the preset table is taller than the space above the footer).
-    const int end = (fskScroll_ + VISIBLE_ROWS < FSK_PRESET_COUNT)
-                        ? fskScroll_ + VISIBLE_ROWS : FSK_PRESET_COUNT;
-    for (int i = fskScroll_; i < end; ++i) {
-        if (i == fskPresetIndex_) {
-            canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
-        canvas.print(FSK_PRESETS[i].label);
-        y += LINE_HEIGHT;
-    }
+    // The shared component derives the visible-row count from the list rect, keeps the selection
+    // on screen, and draws the unified thumb; this callback paints one preset row.
+    fskList_.setItemCount(FSK_PRESET_COUNT);
+    ScrollableList::render(canvas, fskList_, 0, y, canvas.width(), VISIBLE_ROWS * LINE_HEIGHT,
+        LINE_HEIGHT, [x](Canvas& c, int i, int16_t rowY, bool selected) {
+            if (selected) {
+                c.fillRect(0, rowY - 2, c.width(), LINE_HEIGHT, theme::BG_SELECTED());
+                c.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+            c.setCursor(x, rowY);
+            c.print(FSK_PRESETS[i].label);
+        });
 }
 
 } // namespace adversary

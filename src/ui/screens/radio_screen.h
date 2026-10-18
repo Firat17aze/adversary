@@ -21,6 +21,8 @@
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
 #include "../components/text_input_popup.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "../../modules/rf/ook_signal.h"
 #include "../../modules/rf/spectrum_scan.h"
 #include "../../modules/rf/band_sweep.h"
@@ -141,15 +143,15 @@ private:
     MenuState state_;
     MenuState lastHintState_;  // footer hints are refreshed only when state_ changes
     int radioSelection_;   // root: 0=CC1101 Sub-GHz 1=NRF24 2.4 GHz
-    int mainSelection_;    // index into the CC1101 console main menu (MainItem)
-    int mainScroll_;       // scroll window offset for the main menu
+    // Scrolling selection lists. The shared model owns selection + scroll window + wrap; each
+    // draw feeds it the live viewport so the two can't drift (slice-0062). The small fixed
+    // selectors below (radio root, action, preset, jam-mode) fit entirely and stay on listNav.
+    ListScrollModel mainList_;   // CC1101 console main menu (MainItem)
+    ListScrollModel fskList_;    // FSK modem-preset table (slice-0019)
+    ListScrollModel fileList_;   // saved-signal file list
     int presetIndex_;      // index into the frequency-preset table
-    int fskPresetIndex_;   // index into the FSK modem-preset table (slice-0019)
-    int fskScroll_;        // scroll window offset for the FSK preset list
     bool captureIsFsk_;    // the in-flight capture is FSK (else OOK) — set on entry
     int actionSelection_;  // 0=Replay 1=Delete
-    int fileSelection_;
-    int fileScroll_;
     uint8_t captureStage_; // ramps so "Listening" paints before the blocking RX
     int jamModeSel_;       // 0=Carrier (CW) 1=Noise (modulated)
     bool jamArmed_;        // radio configured and held in TX
