@@ -176,7 +176,7 @@ private:
     ui::FooterHints footerHints_;
 
     static constexpr int16_t HEADER_HEIGHT = 20;
-    static constexpr int16_t LINE_HEIGHT = 14;
+    static constexpr int16_t LINE_HEIGHT = theme::LIST_ROW_HEIGHT;
     static constexpr int VISIBLE_ROWS = 5;
     static constexpr uint32_t CAPTURE_WINDOW_MS = 6000;
     static constexpr uint8_t NAME_MAX_LEN = 24;

@@ -1435,7 +1435,7 @@ void HandshakeScreen::drawProgressRing(Canvas& canvas, int x, int y, int radius,
 void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
     const int16_t listY = HEADER_HEIGHT + 4;
     const int16_t listHeight = canvas.height() - HEADER_HEIGHT - FOOTER_HEIGHT - 8;
-    const int16_t itemHeight = 14;
+    const int16_t itemHeight = theme::LIST_ROW_HEIGHT;
 
     if (sessionHandshakes_.empty()) {
         // Empty state

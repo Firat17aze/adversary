@@ -61,7 +61,6 @@ private:
     uint32_t m_pulseStartTime;
     
     static constexpr int CONFIG_OPTION_COUNT = 4;
-    static constexpr int LINE_HEIGHT = 15;
     static constexpr int MARGIN_LEFT = 4;
     static constexpr int FIRST_LINE_Y = 26;
 };

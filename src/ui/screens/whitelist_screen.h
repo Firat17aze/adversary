@@ -92,7 +92,7 @@ private:
     ui::FooterHints footerHints_;
     
     static constexpr int16_t HEADER_HEIGHT = 20;
-    static constexpr int16_t ROW_HEIGHT = 16;
+    static constexpr int16_t ROW_HEIGHT = theme::LIST_ROW_HEIGHT;
 };
 
 } // namespace adversary

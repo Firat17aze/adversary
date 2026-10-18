@@ -82,7 +82,7 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
     // one config row.
     m_configList.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, m_configList, 0, FIRST_LINE_Y, canvas.width(), availableHeight,
-        LINE_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
+        theme::LIST_ROW_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
             // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
             // component (BG_SELECTED, dimmed on footer focus via the flag below) (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());

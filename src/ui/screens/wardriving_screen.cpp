@@ -617,7 +617,7 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     char ramBuf[12];
     ui::StatusBar::render(canvas, "Network Log", statusHeapText(ramBuf, sizeof(ramBuf)));
     
-    const int16_t itemHeight = 14;
+    const int16_t itemHeight = theme::LIST_ROW_HEIGHT;
     const int16_t listY = ui::STATUS_BAR_HEIGHT + 1;                         // sit just under the bar
     const int16_t listHeight = canvas.height() - listY - ui::FOOTER_HEIGHT;  // ...down to the footer
 

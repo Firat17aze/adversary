@@ -191,7 +191,7 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
 #ifdef ESP32
     int16_t y = HEADER_HEIGHT + 4;
     int16_t screenWidth = canvas.width();
-    const int16_t lineHeight = 14;
+    const int16_t lineHeight = theme::LIST_ROW_HEIGHT;
     const int16_t labelX = 8;
     const int16_t valueX = 100;
     

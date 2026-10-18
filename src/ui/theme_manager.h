@@ -415,6 +415,9 @@ constexpr uint8_t MARGIN_LG = 12;
 constexpr uint8_t MARGIN_XL = 16;
 
 // Component Dimensions (unchanged)
+// The standard single-line scrolling-list row. Distinct from LIST_ITEM_HEIGHT (=20),
+// which is the roomier rfid audit-grid row and static dashboard spacing, not this.
+constexpr uint8_t LIST_ROW_HEIGHT = 14;  // single-line list row; see slice-0064
 constexpr uint8_t LIST_ITEM_HEIGHT = 20;
 constexpr uint8_t BUTTON_HEIGHT = 24;
 constexpr uint8_t PROGRESS_BAR_HEIGHT = 8;

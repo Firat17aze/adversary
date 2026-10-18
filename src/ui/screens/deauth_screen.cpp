@@ -211,9 +211,9 @@ void DeauthScreen::drawConfig(Canvas& canvas)
 {
 #ifdef ESP32
     drawHeader(canvas, "DEAUTH CONFIG");
-    
+
     int16_t y = HEADER_HEIGHT + 4;
-    int16_t lineHeight = 14;
+    int16_t lineHeight = theme::LIST_ROW_HEIGHT;
     
     // Target info
     canvas.setTextColor(theme::TEXT_SECONDARY());
