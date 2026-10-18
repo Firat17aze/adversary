@@ -4,6 +4,7 @@
  */
 
 #include "sniffer_screen.h"
+#include "sniffer_actions.h"
 #include "config/config.h"
 #include <cstring>
 #include "core/event_bus.h"
@@ -194,19 +195,6 @@ void CaptureStats::reset() {
     currentChannel = 1;
 }
 
-PacketSummary::PacketSummary()
-    : timestamp(0)
-    , frameType(PacketFrameType::BEACON)
-    , eapolMsg(EapolMsgType::UNKNOWN)
-    , rssi(-100)
-    , channel(0)
-    , flags(0)
-{
-    memset(srcMac, 0, 6);
-    memset(dstMac, 0, 6);
-    memset(ssid, 0, sizeof(ssid));
-}
-
 bool SnifferScreen::handleInput(char key)
 {
     m_needsRedraw = true;
@@ -229,8 +217,10 @@ bool SnifferScreen::handleInput(char key)
                 m_screenState = SnifferScreenState::PACKET_LOG;
                 m_needsRedraw = true;
             } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
-                // Open action menu for selected packet
-                buildActionList(m_packetLog[m_packetLogSelection]);
+                // Snapshot the selected packet now: the ring mutates in place and auto-scroll can
+                // move the selection while the menu is open, so the action must act on this copy.
+                m_selectedPacket = m_packetLog[m_packetLogSelection];
+                buildActionList(m_selectedPacket);
                 m_actionMenuSelection = 0;
                 m_screenState = SnifferScreenState::ACTION_MENU;
                 m_needsRedraw = true;
@@ -854,33 +844,18 @@ const char* SnifferScreen::getActionName(PacketAction action) const
 
 void SnifferScreen::executeAction(PacketAction action)
 {
-    if (m_packetLog.empty()) return;
-    if (action == PacketAction::CANCEL) return;  // Just close menu
-    
-    const PacketSummary& pkt = m_packetLog[m_packetLogSelection];
-
-    // Log action
-    LOG_I("SNIFFER", "Executing action %s on %s",
-          getActionName(action), pkt.ssid[0] ? pkt.ssid : "<hidden>");
-
-    // Map the chosen attack to its screen. The navigator (subscribed in main.cpp) tears down
-    // this screen via hide() and launches the attack on the packet's source — the sniffer
-    // never reaches into the attack screens itself, which is why no downcast is needed here.
-    ScreenId target;
-    switch (action) {
-        case PacketAction::HANDSHAKE_CAPTURE: target = ScreenId::HANDSHAKE; break;
-        case PacketAction::DEAUTH_ATTACK:     target = ScreenId::DEAUTH;    break;
-        case PacketAction::EVIL_TWIN:         target = ScreenId::EVIL_TWIN; break;
-        case PacketAction::KARMA_ATTACK:      target = ScreenId::KARMA;     break;
-        default: return;  // no attack mapping for this action
+    // Act on the packet snapshotted when the menu opened, never on a live ring index. The attack
+    // target (screen + source MAC/SSID/channel) is built by the pure, native-tested policy;
+    // CANCEL and unmapped actions return false and just close the menu.
+    EventData evt(EventType::ATTACK_TARGET_SELECTED);
+    if (!makeSnifferAttackTarget(m_selectedPacket, action, evt.payload.attackTarget)) {
+        return;
     }
 
-    EventData evt(EventType::ATTACK_TARGET_SELECTED);
-    evt.payload.attackTarget.targetScreen = static_cast<int16_t>(target);
-    memcpy(evt.payload.attackTarget.bssid, pkt.srcMac, 6);
-    strncpy(evt.payload.attackTarget.ssid, pkt.ssid, 32);
-    evt.payload.attackTarget.ssid[32] = '\0';
-    evt.payload.attackTarget.channel = pkt.channel;
+    // The navigator (subscribed in main.cpp) tears down this screen via hide() and launches the
+    // attack on the packet's source: the sniffer never reaches into the attack screens itself.
+    LOG_I("SNIFFER", "Executing action %s on %s",
+          getActionName(action), m_selectedPacket.ssid[0] ? m_selectedPacket.ssid : "<hidden>");
     EventBus::getInstance().publish(evt);
 }
 

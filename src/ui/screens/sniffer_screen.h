@@ -17,6 +17,7 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
 #include "screen_interface.h"
+#include "sniffer_types.h"
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -72,45 +73,8 @@ struct CaptureStats {
     void reset();
 };
 
-/**
- * @brief Frame type for packet log display
- */
-enum class PacketFrameType : uint8_t {
-    BEACON = 0,
-    PROBE_REQ = 1,
-    PROBE_RESP = 2,
-    DATA = 3,
-    EAPOL = 4,
-    DEAUTH = 5
-};
-
-/**
- * @brief EAPOL message type for handshake tracking
- */
-enum class EapolMsgType : uint8_t {
-    UNKNOWN = 0,
-    M1 = 1,
-    M2 = 2,
-    M3 = 3,
-    M4 = 4
-};
-
-/**
- * @brief Lightweight packet summary for log display
- */
-struct PacketSummary {
-    uint32_t timestamp;
-    PacketFrameType frameType;
-    EapolMsgType eapolMsg;
-    int8_t rssi;
-    uint8_t srcMac[6];
-    uint8_t dstMac[6];
-    char ssid[17];
-    uint8_t channel;
-    uint8_t flags;
-    
-    PacketSummary();
-};
+// PacketFrameType, EapolMsgType and PacketSummary now live in sniffer_types.h (display-free,
+// shared with the native-tested sniffer_actions policy).
 
 /**
  * @brief Sniffer screen display state
@@ -121,16 +85,7 @@ enum class SnifferScreenState : uint8_t {
     ACTION_MENU
 };
 
-/**
- * @brief Quick action types available from packet log
- */
-enum class PacketAction : uint8_t {
-    HANDSHAKE_CAPTURE,
-    DEAUTH_ATTACK,
-    EVIL_TWIN,
-    KARMA_ATTACK,
-    CANCEL
-};
+// PacketAction now lives in sniffer_types.h (shared with the native-tested sniffer_actions policy).
 
 /**
  * @brief Sniffer screen UI component
@@ -240,7 +195,11 @@ private:
     size_t m_packetLogSelection;
     size_t m_packetLogScroll;
     bool m_logPaused;
-    
+    // Snapshot of the packet the action menu was opened on. The menu acts on this copy, never on
+    // m_packetLog[m_packetLogSelection]: the ring overwrites entries in place and auto-scroll can
+    // move the selection while the menu is open, so a live index would target a different packet.
+    PacketSummary m_selectedPacket;
+
     size_t m_actionMenuSelection;
     PacketAction m_availableActions[6];
     size_t m_actionCount;
