@@ -105,6 +105,48 @@ void test_distinct_packets_yield_distinct_targets() {
     TEST_ASSERT_EQUAL_UINT8(6, ob.channel);
 }
 
+// --- Ring display-to-physical mapping (slice-0070) ---
+// Before the ring wraps, head is 0 and the display order already equals physical order.
+void test_log_index_before_wrap_is_identity() {
+    const size_t size = 7;  // fewer than PACKET_LOG_SIZE: ring still filling, head pinned at 0
+    for (int d = 0; d < static_cast<int>(size); ++d) {
+        TEST_ASSERT_EQUAL_UINT32((size_t)d, snifferLogPhysicalIndex(0, size, d));
+    }
+}
+
+// After a wrap, the oldest slot (head) is display row 0 and the newest is the preceding slot.
+void test_log_index_after_wrap_rotates_oldest_to_top() {
+    const size_t size = 25;
+    const size_t head = 5;  // slot 5 is oldest, slot 4 is newest
+    TEST_ASSERT_EQUAL_UINT32(5u, snifferLogPhysicalIndex(head, size, 0));           // oldest -> top
+    TEST_ASSERT_EQUAL_UINT32(4u, snifferLogPhysicalIndex(head, size, (int)size - 1)); // newest -> bottom
+    TEST_ASSERT_EQUAL_UINT32(24u, snifferLogPhysicalIndex(head, size, 19));         // (5+19)%25
+    TEST_ASSERT_EQUAL_UINT32(0u, snifferLogPhysicalIndex(head, size, 20));          // (5+20)%25 wraps
+}
+
+// A ring that has wrapped exactly once (head == 1): the newest row is the slot just overwritten.
+void test_log_index_just_wrapped_newest_is_overwritten_slot() {
+    const size_t size = 25;
+    TEST_ASSERT_EQUAL_UINT32(1u, snifferLogPhysicalIndex(1, size, 0));               // oldest -> slot 1
+    TEST_ASSERT_EQUAL_UINT32(0u, snifferLogPhysicalIndex(1, size, (int)size - 1));   // newest -> slot 0
+}
+
+// Across a full ring the mapping is a bijection: every physical slot is shown exactly once.
+void test_log_index_covers_every_slot_once() {
+    const size_t size = 25;
+    const size_t head = 13;
+    bool seen[25] = {false};
+    for (int d = 0; d < static_cast<int>(size); ++d) {
+        size_t slot = snifferLogPhysicalIndex(head, size, d);
+        TEST_ASSERT_TRUE(slot < size);
+        TEST_ASSERT_FALSE(seen[slot]);  // no slot shown twice
+        seen[slot] = true;
+    }
+    for (size_t s = 0; s < size; ++s) {
+        TEST_ASSERT_TRUE(seen[s]);  // no slot skipped
+    }
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -116,5 +158,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_cancel_returns_false_and_leaves_out_untouched);
     RUN_TEST(test_target_carries_selected_packet_fields);
     RUN_TEST(test_distinct_packets_yield_distinct_targets);
+    RUN_TEST(test_log_index_before_wrap_is_identity);
+    RUN_TEST(test_log_index_after_wrap_rotates_oldest_to_top);
+    RUN_TEST(test_log_index_just_wrapped_newest_is_overwritten_slot);
+    RUN_TEST(test_log_index_covers_every_slot_once);
     return UNITY_END();
 }

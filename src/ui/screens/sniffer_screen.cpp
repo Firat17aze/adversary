@@ -217,7 +217,9 @@ bool SnifferScreen::handleInput(char key)
             } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
                 // Snapshot the selected packet now: the ring mutates in place and auto-scroll can
                 // move the selection while the menu is open, so the action must act on this copy.
-                m_selectedPacket = m_packetLog[m_packetLogList.selectedIndex()];
+                // The list holds an oldest-first display row; resolve it to its physical slot (slice-0070).
+                m_selectedPacket = m_packetLog[snifferLogPhysicalIndex(m_packetLogHead, m_packetLog.size(),
+                                                                       m_packetLogList.selectedIndex())];
                 buildActionList(m_selectedPacket);
                 m_actionMenuSelection = 0;
                 m_screenState = SnifferScreenState::ACTION_MENU;
@@ -1069,7 +1071,8 @@ void SnifferScreen::drawPacketLog(Canvas& canvas) {
     const bool focused = (m_screenState == SnifferScreenState::PACKET_LOG) && !footerHints_.hasFocus();
     ScrollableList::render(canvas, m_packetLogList, 0, listTop, canvas.width(), listH,
         theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
-            drawPacketLogEntry(c, m_packetLog[idx], rowY);
+            // idx is an oldest-first display row; map it to its physical ring slot (slice-0070).
+            drawPacketLogEntry(c, m_packetLog[snifferLogPhysicalIndex(m_packetLogHead, m_packetLog.size(), idx)], rowY);
         },
         focused);
 

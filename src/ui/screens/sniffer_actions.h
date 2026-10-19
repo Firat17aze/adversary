@@ -25,4 +25,17 @@ namespace adversary {
 bool makeSnifferAttackTarget(const PacketSummary& packet, PacketAction action,
                              AttackTargetEventData& out);
 
+/**
+ * @brief Map an oldest-first display row to its physical slot in the in-place capture ring.
+ *
+ * The packet log is a fixed-capacity ring overwritten in place: while it fills, @p head stays
+ * 0 and physical order equals capture order; once it wraps, @p head is the oldest slot and the
+ * linear display index no longer matches capture order. This resolves display row @p
+ * displayIndex (0 = oldest shown, size-1 = newest) to the physical index into the ring.
+ *
+ * Pure and display-free so the wrap arithmetic is unit-testable off-device. Precondition
+ * enforced by the callers: @p size > 0, @p head < @p size, and 0 <= @p displayIndex < @p size.
+ */
+size_t snifferLogPhysicalIndex(size_t head, size_t size, int displayIndex);
+
 } // namespace adversary

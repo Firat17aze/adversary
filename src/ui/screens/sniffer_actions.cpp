@@ -32,4 +32,11 @@ bool makeSnifferAttackTarget(const PacketSummary& packet, PacketAction action,
     return true;
 }
 
+size_t snifferLogPhysicalIndex(size_t head, size_t size, int displayIndex)
+{
+    // head is 0 until the ring wraps, so before the wrap this is the identity the screen used
+    // historically; after the wrap it rotates the oldest slot (head) to display row 0.
+    return (head + static_cast<size_t>(displayIndex)) % size;
+}
+
 } // namespace adversary
