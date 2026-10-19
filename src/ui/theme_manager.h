@@ -418,6 +418,15 @@ constexpr uint8_t MARGIN_XL = 16;
 // The standard single-line scrolling-list row. Distinct from LIST_ITEM_HEIGHT (=20),
 // which is the roomier rfid audit-grid row and static dashboard spacing, not this.
 constexpr uint8_t LIST_ROW_HEIGHT = 14;  // single-line list row; see slice-0064
+// The default 6x8 GFX font occupies an 8px cell and setCursor sets the cell top, so centring one
+// line in a row band is (LIST_ROW_HEIGHT - FONT_CELL_HEIGHT) / 2 = 3 for the 14px band. The cell's
+// ink is top-weighted (a 5x7 glyph with a 1px bottom gap), so cell-centring reads a touch high
+// rather than low; on device 2026-10-19 the operator preferred this to the ink-centred +4 (which
+// sat too low, revising the slice-0064 whitelist value). A bare +2 reads ~2px high. Derived from
+// both dimensions so a change to either re-centres every single-line row with no call-site edit
+// (slice-0074).
+constexpr uint8_t FONT_CELL_HEIGHT = 8;
+constexpr int16_t LIST_ROW_TEXT_DY = (LIST_ROW_HEIGHT - FONT_CELL_HEIGHT) / 2;
 constexpr uint8_t LIST_ITEM_HEIGHT = 20;
 constexpr uint8_t BUTTON_HEIGHT = 24;
 constexpr uint8_t PROGRESS_BAR_HEIGHT = 8;

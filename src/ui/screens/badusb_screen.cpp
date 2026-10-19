@@ -265,12 +265,12 @@ void BadUsbScreen::drawIdle(Canvas& canvas) {
     ScrollableList::render(canvas, m_scriptList, 0, listY, config::SCREEN_WIDTH, listH,
         theme::LIST_ROW_HEIGHT, [this](Canvas& c, int i, int16_t rowY, bool sel) {
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(10, rowY + 2);
+            c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(m_scripts[i].name);
 
             if (!m_scripts[i].isBuiltIn) {
                 c.setTextColor(sel ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
-                c.setCursor(config::SCREEN_WIDTH - 22, rowY + 2);
+                c.setCursor(config::SCREEN_WIDTH - 22, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print("SD");
             }
         }, !m_footer.hasFocus());  // dim the band while the footer holds focus

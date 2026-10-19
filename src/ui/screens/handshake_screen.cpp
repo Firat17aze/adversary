@@ -1460,7 +1460,7 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
             const auto& hs = sessionHandshakes_[idx];
 
             // Type badge: brackets in primary text, the type itself in the accent colour.
-            c.setCursor(4, y + 2);
+            c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
             c.setTextColor(theme::TEXT_PRIMARY());
             c.print("[");
             c.setTextColor(theme::ACCENT());
@@ -1469,14 +1469,14 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
             c.print("]");
 
             // SSID
-            c.setCursor(40, y + 2);
+            c.setCursor(40, y + theme::LIST_ROW_TEXT_DY);
             char ssid[17];
             strncpy(ssid, (const char*)hs.ssid, 16);
             ssid[16] = '\0';
             c.print(ssid);
 
             // Quality indicator (if available - estimating from message count)
-            c.setCursor(c.width() - 30, y + 2);
+            c.setCursor(c.width() - 30, y + theme::LIST_ROW_TEXT_DY);
             int quality = (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90 : (hs.hasMsg2 ? 70 : 50);
             c.print(quality);
             c.print("%");

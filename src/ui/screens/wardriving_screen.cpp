@@ -649,21 +649,21 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
             // selection-coloured (slice-0063 band-only policy for data lists).
             c.setTextColor(theme::TEXT_PRIMARY());
 
-            c.setCursor(4, y + 2);
+            c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
             char ssid[17];
             strncpy(ssid, net.ssid, 16);
             ssid[16] = '\0';
             c.print(ssid);
 
-            c.setCursor(c.width() - 90, y + 2);
+            c.setCursor(c.width() - 90, y + theme::LIST_ROW_TEXT_DY);
             c.printf("Ch%d", net.channel);
 
-            c.setCursor(c.width() - 60, y + 2);
+            c.setCursor(c.width() - 60, y + theme::LIST_ROW_TEXT_DY);
             c.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
 
             uint16_t rssiColor = getRSSIColor(net.rssi);
             c.setTextColor(rssiColor);
-            c.setCursor(c.width() - 30, y + 2);
+            c.setCursor(c.width() - 30, y + theme::LIST_ROW_TEXT_DY);
             c.printf("%d", net.rssi);
         });
 

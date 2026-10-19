@@ -36,9 +36,6 @@ const char* txSourceLabel(ir::IrTxSource src) {
 // Bound for a formatted feedback/description line; toasts truncate at 63.
 constexpr size_t MESSAGE_BUF = 64;
 
-// Baseline offset of row text within a LIST_ROW_HEIGHT (14px) row, centring the 8px font.
-constexpr int16_t LIST_ROW_TEXT_DY = 3;
-
 // Why the main-menu Learn row is greyed out: no IR receiver module is present. Shown as an
 // inline tag on the disabled row so the operator sees the reason, since skip-nav means the row
 // can no longer be selected to surface it (slice-0072).
@@ -538,8 +535,8 @@ void IrRecordScreen::render(Canvas& canvas) {
 
 // Selection band for the IR fixed menus, matching ScrollableList's convention (slice-0072):
 // a full-width band at the row top, BG_SELECTED when the menu holds focus and dimmed to
-// BG_SECONDARY when the footer does. Paired with LIST_ROW_TEXT_DY it vertically centres the
-// 8px font in the LIST_ROW_HEIGHT band, so these menus match the saved-codes list.
+// BG_SECONDARY when the footer does. Paired with theme::LIST_ROW_TEXT_DY it vertically centres
+// the font in the LIST_ROW_HEIGHT band, so these menus match the saved-codes list.
 static void paintMenuBand(Canvas& canvas, int16_t rowTop, int16_t w, bool focused) {
     canvas.fillRect(0, rowTop, w, theme::LIST_ROW_HEIGHT,
                     focused ? theme::BG_SELECTED() : theme::BG_SECONDARY());
@@ -547,11 +544,11 @@ static void paintMenuBand(Canvas& canvas, int16_t rowTop, int16_t w, bool focuse
 
 void IrRecordScreen::drawMain(Canvas& canvas) {
     const int16_t x = theme::PADDING_MD;
-    int16_t rowTop = HEADER_HEIGHT + 3;  // text lands at +LIST_ROW_TEXT_DY, i.e. the prior baseline
+    int16_t rowTop = HEADER_HEIGHT + 3;  // first row starts below the header; text at +LIST_ROW_TEXT_DY
     canvas.setTextSize(1);
 
     canvas.setTextColor(theme::ACCENT());
-    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+    canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
     canvas.printf("IR   TX: %s", txSourceLabel(txSource()));
     rowTop += theme::LIST_ROW_HEIGHT;
 
@@ -564,7 +561,7 @@ void IrRecordScreen::drawMain(Canvas& canvas) {
         canvas.setTextColor(learnDisabled ? theme::TEXT_DISABLED()
                             : selected     ? theme::TEXT_PRIMARY()
                                            : theme::TEXT_SECONDARY());
-        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+        canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
         canvas.print(items[i]);
         if (learnDisabled) canvas.print(LEARN_DISABLED_TAG);  // state the reason it is greyed
         rowTop += theme::LIST_ROW_HEIGHT;
@@ -643,7 +640,7 @@ void IrRecordScreen::drawCodeList(Canvas& canvas) {
         canvas, codeList_, 0, listTop, canvas.width(), listH, theme::LIST_ROW_HEIGHT,
         [this](Canvas& c, int itemIndex, int16_t rowTopY, bool isSelected) {
             c.setTextColor(isSelected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
-            c.setCursor(theme::PADDING_MD, rowTopY + LIST_ROW_TEXT_DY);
+            c.setCursor(theme::PADDING_MD, rowTopY + theme::LIST_ROW_TEXT_DY);
             c.printf("%.26s", codes_[itemIndex].name);
         },
         !footerHints_.hasFocus());  // dim the band when the footer holds focus
@@ -654,7 +651,7 @@ void IrRecordScreen::drawCodeAction(Canvas& canvas) {
     int16_t rowTop = HEADER_HEIGHT + 3;
     canvas.setTextSize(1);
     canvas.setTextColor(theme::ACCENT());
-    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+    canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
     canvas.printf("%.26s", codes_[codeList_.selectedIndex()].name);
     rowTop += theme::LIST_ROW_HEIGHT;
 
@@ -666,7 +663,7 @@ void IrRecordScreen::drawCodeAction(Canvas& canvas) {
         canvas.setTextColor(selected    ? theme::TEXT_PRIMARY()
                             : i == 1     ? theme::WARNING()  // Delete reads as a warning
                                          : theme::TEXT_SECONDARY());
-        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+        canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
         canvas.print(items[i]);
         rowTop += theme::LIST_ROW_HEIGHT;
     }
@@ -701,7 +698,7 @@ void IrRecordScreen::drawTxSourceSelect(Canvas& canvas) {
     int16_t rowTop = HEADER_HEIGHT + 3;
     canvas.setTextSize(1);
     canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+    canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
     canvas.print("Transmit via");
     rowTop += theme::LIST_ROW_HEIGHT;
     const ir::IrTxSource sources[2] = {ir::IrTxSource::BuiltIn, ir::IrTxSource::CapArray};
@@ -710,7 +707,7 @@ void IrRecordScreen::drawTxSourceSelect(Canvas& canvas) {
         const bool selected = (i == txSelection_);
         if (selected) paintMenuBand(canvas, rowTop, canvas.width(), focused);
         canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
-        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
+        canvas.setCursor(x, rowTop + theme::LIST_ROW_TEXT_DY);
         canvas.print(txSourceLabel(sources[i]));
         rowTop += theme::LIST_ROW_HEIGHT;
     }

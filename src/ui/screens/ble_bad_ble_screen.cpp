@@ -271,7 +271,7 @@ void BleBadBleScreen::drawConnected(Canvas& canvas) {
     ScrollableList::render(canvas, m_actionList, 0, listTop, config::SCREEN_WIDTH, listH,
         theme::LIST_ROW_HEIGHT, [currentActions](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(15, rowY + 2);
+            c.setCursor(15, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(currentActions[idx]);
         },
         !footerHints_.hasFocus());
@@ -656,7 +656,7 @@ void BleBadBleScreen::drawScriptSelect(Canvas& canvas) {
     ScrollableList::render(canvas, m_bleScriptList, 0, listTop, config::SCREEN_WIDTH, listH,
         theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(10, rowY + 2);
+            c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(m_bleScripts[idx].name);
         },
         true);

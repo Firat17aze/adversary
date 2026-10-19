@@ -199,10 +199,7 @@ void WhitelistScreen::drawList(Canvas& canvas) {
             // Selection band drawn by the component; text is content-coloured (slice-0063).
             c.setTextColor(theme::TEXT_PRIMARY());
 
-            // +4 visually centers the glyph in the LIST_ROW_HEIGHT band: the 6x8 default
-            // font's ink is top-weighted in its 8px cell, so the cell's geometric top (+3)
-            // still reads ~1px high. The other single-line lists use +2 (slice-0064).
-            c.setCursor(8, rowY + 4);
+            c.setCursor(8, rowY + theme::LIST_ROW_TEXT_DY);  // shared single-line centre (slice-0074)
 
             // Display SSID first, then BSSID
             char displayText[64] = {0};

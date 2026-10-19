@@ -87,7 +87,7 @@ void BleAppleAttackScreen::drawConfig(Canvas& canvas) {
     ScrollableList::render(canvas, m_promptList, 0, (int16_t)y, config::SCREEN_WIDTH, listH,
         theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(10, rowY + 2);
+            c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(m_promptOptions[idx].label);
         },
         !footerHints_.hasFocus());

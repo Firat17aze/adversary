@@ -282,12 +282,12 @@ void DeauthScreen::drawConfig(Canvas& canvas)
             // the band is drawn by the component and dims when the footer holds focus, via the
             // focused flag passed below (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(4, rowY + 2);
+            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(options[idx].label);
 
             // Right-align value
             int16_t valueWidth = strlen(options[idx].value) * 6;
-            c.setCursor(c.width() - valueWidth - 4, rowY + 2);
+            c.setCursor(c.width() - valueWidth - 4, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(options[idx].value);
         },
         !footerHints_.hasFocus());

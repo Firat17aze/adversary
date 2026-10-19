@@ -86,7 +86,7 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
             // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
             // component (BG_SELECTED, dimmed on footer focus via the flag below) (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(MARGIN_LEFT, rowY + 2);
+            c.setCursor(MARGIN_LEFT, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(optionLabels[idx]);
 
             const char* val = nullptr;
@@ -94,7 +94,7 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
             else if (idx == 1) val = prompts[(int)m_config.prompt];
             else if (idx == 2) val = intStr;
             if (val) {
-                c.setCursor(80, rowY + 2);
+                c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(val);
             }
         },

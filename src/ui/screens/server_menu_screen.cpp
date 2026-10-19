@@ -142,7 +142,7 @@ void ServerMenuScreen::drawMenu(Canvas& canvas) {
         theme::LIST_ROW_HEIGHT, [this, &settings](Canvas& c, int i, int16_t rowY, bool /*selected*/) {
             c.setTextSize(1);
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(12, rowY + 2);
+            c.setCursor(12, rowY + theme::LIST_ROW_TEXT_DY);
             if (i == 0) {
                 c.print(serverRunning_ ? "Stop Server" : "Start Server");
             } else if (i == 1) {

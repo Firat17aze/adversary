@@ -266,12 +266,12 @@ void BeaconSpamScreen::drawConfig(Canvas& canvas)
             if (idx == CONFIG_OPTION_COUNT - 1) {
                 // Start button - centered
                 int textWidth = strlen(options[idx].label) * 6;
-                c.setCursor((c.width() - textWidth) / 2, rowY + 2);
+                c.setCursor((c.width() - textWidth) / 2, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(options[idx].label);
             } else {
-                c.setCursor(labelX, rowY + 2);
+                c.setCursor(labelX, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(options[idx].label);
-                c.setCursor(valueX, rowY + 2);
+                c.setCursor(valueX, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(options[idx].value);
             }
         },

@@ -838,7 +838,7 @@ void KarmaScreen::renderClients(Canvas& canvas) {
         ScrollableList::render(canvas, clientList_, 0, listTop, config::SCREEN_WIDTH, listH,
             theme::LIST_ROW_HEIGHT, [&macs](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
                 c.setTextColor(theme::TEXT_PRIMARY());
-                c.setCursor(10, rowY + 2);
+                c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(macs[idx].c_str());
                 auto* client = TrafficProxy::getInstance().getClientByMac(macs[idx].c_str());
                 if (client) {

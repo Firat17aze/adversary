@@ -1082,7 +1082,7 @@ void RadioScreen::drawMain(Canvas& canvas) {
             // the glyph in the LINE_HEIGHT band (the band used to sit at rowY-2, so text at rowY
             // looked centred; the component draws it at the row rect, so the offset moves to text).
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(x, rowY + 2);
+            c.setCursor(x, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(MAIN_ITEMS[i]);
         });
 }
@@ -1152,7 +1152,7 @@ void RadioScreen::drawSignalList(Canvas& canvas) {
             // Band drawn by the component; text is content-coloured (slice-0063). +2 centres the
             // glyph in the band (was rowY-2 band + rowY text; now row-rect band + nudged text).
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(x, rowY + 2);
+            c.setCursor(x, rowY + theme::LIST_ROW_TEXT_DY);
             c.printf("%.26s", signals_[i].name);
         });
 }
@@ -1310,7 +1310,7 @@ void RadioScreen::drawFskSelect(Canvas& canvas) {
             // Band drawn by the component; text is content-coloured (slice-0063). +2 centres the
             // glyph in the band (was rowY-2 band + rowY text; now row-rect band + nudged text).
             c.setTextColor(theme::TEXT_PRIMARY());
-            c.setCursor(x, rowY + 2);
+            c.setCursor(x, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(FSK_PRESETS[i].label);
         });
 }
