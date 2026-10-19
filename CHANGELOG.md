@@ -7,6 +7,14 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-19 (v0.4.0-alpha)
+- **Wardriving now observes BLE as well as WiFi.** A BLE observation source feeds both the live network log and the WiGLE CSV export, selectable with a radio-mode setting (WiFi / BLE / both); deduplication is type-aware so a WiFi AP and a BLE peripheral never collapse into one row. WiFi and BLE run at the same time via radio coexistence. (slices 0061, 0075; ADR-0060)
+- **Sniffer capture no longer corrupts the heap.** The WiFi-driver-task callback mutated containers the main loop also touched with no synchronization, so under load the dual-core chip smashed allocator metadata and rebooted (`CORRUPT HEAP`), usually caught on exit-to-menu. Each frame is now copied into a POD and handed to the main loop over a FreeRTOS queue, which does all stats/log/pcap work on one task. (slice-0078)
+- **Packet log reads cleanly under heavy traffic.** Scrolling up off the newest row freezes the log so it stays readable at any packet rate (stats, flood detection and capture keep running), and the log renders in capture order after its ring buffer wraps. (slices 0070, 0071)
+- **Release firmware runs quiet.** A level-gated logging layer and a dedicated release build ship the image at WARN, so the serial console is no longer flooded at runtime. (ADR-0051)
+- **One shared component behind every list and popup menu.** The scanner, sniffer, wardriving, captures, RFID, radio, BLE, settings and handshake-history lists, and all eight quick-action popups, now route through a single list/menu component, so navigation, scrolling and the selected-row highlight are consistent across the whole UI. (slices 0062-0077)
+- **Evil Twin lists every connected client.** The clients view no longer drops entries. (slice-0076)
+
 ## 2026-10-11 (v0.3.0-alpha)
 - **RFID Write / clone.** Restore a saved `.nfc` dump onto a MIFARE Classic 1K card — all 47 data blocks written back with the recovered keys (Key A → Key B → factory-FF fallback), with a per-block write-retry so a transient RF warm-up can't drop a block on the first pass. Every outcome is reported (blocks written, auth failures, write failures); nothing is silently skipped. (slices 0043, 0046, 0047)
 - **UID cloning on magic cards.** The opt-in UID write now lands block 0 on both card families: a Gen2/CUID direct write, and — falling through when that is refused — the Gen1a backdoor. The firmware reports which card type it detected; an ordinary card's locked UID is reported plainly, not masked. Verified end-to-end on a Gen1a card (UID written, read back, then restored). (slice-0048)

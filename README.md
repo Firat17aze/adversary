@@ -88,7 +88,7 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 - **Evil Twin** - Rogue AP with captive-portal credential harvesting.
 - **Karma AP** - Auto-responds to any client probe request.
 - **Beacon Spam / Probe Flood** - Fake-network flooding and probe-request saturation.
-- **Wardriving** - GPS-integrated network mapping with CSV/KML export and **WiGLE** upload.
+- **Wardriving** - GPS-integrated mapping of **WiFi and BLE** observations, with CSV/KML export and **WiGLE** upload.
 - **Traffic Proxy** - Real-time DNS/HTTP/HTTPS metadata capture from Evil Twin victims.
 - **Captures Browser** - Manage Handshakes/Packets/Credentials, with cloud-cracking status and a bulk **"Sync all new"** action across every configured cracking service.
 
