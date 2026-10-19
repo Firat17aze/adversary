@@ -160,7 +160,7 @@ void BLEScanner::onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         // Add new device
         BLEDeviceInfo info;
         info.address = advertisedDevice->getAddress();
-        info.name = advertisedDevice->haveName() ? advertisedDevice->getName() : "Unknown";
+        info.name = advertisedDevice->haveName() ? advertisedDevice->getName() : BLE_NAME_UNKNOWN;
         info.rssi = advertisedDevice->getRSSI();
         info.lastSeen = millis();
         info.isFastPair = ble::isFastPair(advertisedDevice);

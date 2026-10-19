@@ -9,9 +9,16 @@
 #include "modules/wifi/wifi_scanner.h"
 #include "hal/expansion/expansion_cap.h"
 #include "modules/storage/settings_manager.h"
+#ifdef ARDUINO
+#include "modules/ble/ble_scanner.h"   // NimBLE; device-only (not in the native build filter)
+#endif
 #include <Arduino.h>
 
 namespace adversary {
+
+// How often the live Network Log harvests the scan sources. Both WiFiScanner and BLEScanner
+// are polled, not event-driven, so the ring is refreshed on this cadence rather than per frame.
+constexpr uint32_t LOG_HARVEST_INTERVAL_MS = 2000;
 
 // ============================================================================
 // Constructor / Destructor
@@ -29,9 +36,11 @@ WardrivingScreen::WardrivingScreen()
     // Initialize network log
     for (size_t i = 0; i < MAX_LOG_NETWORKS; i++) {
         networkLog_[i].ssid[0] = '\0';
+        memset(networkLog_[i].bssid, 0, sizeof(networkLog_[i].bssid));
         networkLog_[i].rssi = -100;
         networkLog_[i].channel = 0;
         networkLog_[i].security = 0;
+        networkLog_[i].type = wardriving::ObservationType::WIFI;
         networkLog_[i].timestamp = 0;
         networkLog_[i].valid = false;
     }
@@ -113,58 +122,52 @@ void WardrivingScreen::update() {
     }
     
     uint32_t now = millis();
-    
+
     // Only process WiFi scanning when session is active (not during SAVING/IDLE)
     if (state_ == WardrivingState::SCANNING || state_ == WardrivingState::PAUSED) {
         // Process wardriving state machine (triggers WiFi scans)
         auto& manager = wardriving::WardrivingManager::getInstance();
         manager.update();
-        
+
         // Process WiFi scanner (completes async scans and processes results)
         auto& scanner = WiFiScanner::getInstance();
         scanner.update();
     }
-    
-    // Add networks to log from WiFi scanner (when scanning)
-    if (state_ == WardrivingState::SCANNING) {
-        auto& scanner = WiFiScanner::getInstance();
-        const auto& networks = scanner.getNetworks();
-        
-        // Add new networks to circular buffer (rate limited)
-        if (!networks.empty() && now - lastUpdateMs_ >= 2000) {
-            for (const auto& net : networks) {
-                // Check if already in last few entries (avoid immediate duplicates)
-                bool isDuplicate = false;
-                for (int i = 0; i < 5 && i < (int)logCount_; i++) {
-                    int checkIdx = (logWriteIndex_ - 1 - i + MAX_LOG_NETWORKS) % MAX_LOG_NETWORKS;
-                    if (networkLog_[checkIdx].valid && 
-                        strcmp(networkLog_[checkIdx].ssid, net.ssid.c_str()) == 0) {
-                        isDuplicate = true;
-                        break;
-                    }
-                }
-                
-                if (!isDuplicate) {
-                    // Add to circular buffer
-                    auto& logEntry = networkLog_[logWriteIndex_];
-                    strncpy(logEntry.ssid, net.ssid.c_str(), sizeof(logEntry.ssid) - 1);
-                    logEntry.ssid[sizeof(logEntry.ssid) - 1] = '\0';
-                    logEntry.rssi = net.rssi;
-                    logEntry.channel = net.channel;
-                    logEntry.security = static_cast<uint8_t>(net.security);
-                    logEntry.timestamp = now;
-                    logEntry.valid = true;
-                    
-                    // Advance write index
-                    logWriteIndex_ = (logWriteIndex_ + 1) % MAX_LOG_NETWORKS;
-                    if (logCount_ < MAX_LOG_NETWORKS) {
-                        logCount_++;
-                    }
-                }
-            }
-            
-            lastUpdateMs_ = now;
+
+    // Harvest both scan sources into the live log (rate limited). The manager owns the CSV
+    // ingest; this is the parallel display path, so BLE is read here too or the live list
+    // would show only WiFi while the CSV records both (slice-0075).
+    if (state_ == WardrivingState::SCANNING && now - lastUpdateMs_ >= LOG_HARVEST_INTERVAL_MS) {
+        const auto& networks = WiFiScanner::getInstance().getNetworks();
+        for (const auto& net : networks) {
+            appendObservation(net.ssid.c_str(), net.bssid, net.rssi, net.channel,
+                              static_cast<uint8_t>(net.security),
+                              wardriving::ObservationType::WIFI);
         }
+
+#ifdef ARDUINO
+        // BLE advertisers: the manager brings the controller up in BLE/BOTH mode and tears it
+        // down in WiFi-only (ADR-0060), so an initialized scanner is the signal BLE is live.
+        if (BLEScanner::isInitialized()) {
+            auto devices = BLEScanner::getInstance().getDevices();
+            for (const auto& dev : devices) {
+                // NimBLEAddress::getNative() is little-endian; reverse to canonical BD_ADDR
+                // order so the on-screen MAC matches the CSV, mirroring processBLEScan.
+                const uint8_t* native = dev.address.getNative();
+                uint8_t addr[6];
+                for (int i = 0; i < 6; i++) {
+                    addr[i] = native[5 - i];
+                }
+                // The scanner stamps nameless advertisers with BLE_NAME_UNKNOWN, so test the
+                // advertised-name predicate (not emptiness) and let the row fall back to the MAC.
+                appendObservation(hasAdvertisedName(dev) ? dev.name.c_str() : nullptr, addr,
+                                  static_cast<int8_t>(dev.rssi), 0, 0,
+                                  wardriving::ObservationType::BLE);
+            }
+        }
+#endif
+
+        lastUpdateMs_ = now;
     }
     
     // Auto-transition from SAVING to IDLE
@@ -613,6 +616,37 @@ void WardrivingScreen::drawSessionStats(Canvas& canvas, int16_t y) {
     canvas.print(distStr);
 }
 
+void WardrivingScreen::appendObservation(const char* name, const uint8_t* bssid, int8_t rssi,
+                                         uint8_t channel, uint8_t security,
+                                         wardriving::ObservationType type) {
+    // Already shown? Dedup by (type, bssid) across every valid slot. A WiFi BSSID and a BLE
+    // BD_ADDR can be byte-equal, so the type is part of the key (same rule as the manager's
+    // observationKey). Scanning all <=25 rows, not a trailing window, is what makes a
+    // cumulative source show each radio once.
+    for (size_t i = 0; i < logCount_; i++) {
+        const auto& e = networkLog_[i];
+        if (e.valid && e.type == type && memcmp(e.bssid, bssid, 6) == 0) {
+            return;
+        }
+    }
+
+    auto& entry = networkLog_[logWriteIndex_];
+    strncpy(entry.ssid, name ? name : "", sizeof(entry.ssid) - 1);
+    entry.ssid[sizeof(entry.ssid) - 1] = '\0';
+    memcpy(entry.bssid, bssid, sizeof(entry.bssid));
+    entry.rssi = rssi;
+    entry.channel = channel;
+    entry.security = security;
+    entry.type = type;
+    entry.timestamp = millis();
+    entry.valid = true;
+
+    logWriteIndex_ = (logWriteIndex_ + 1) % MAX_LOG_NETWORKS;
+    if (logCount_ < MAX_LOG_NETWORKS) {
+        logCount_++;
+    }
+}
+
 void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     char ramBuf[12];
     ui::StatusBar::render(canvas, "Network Log", statusHeapText(ramBuf, sizeof(ramBuf)));
@@ -645,21 +679,36 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
             const auto& net = networkLog_[bufferIdx];
             if (!net.valid) return;
 
+            const bool isBle = net.type == wardriving::ObservationType::BLE;
+
             // The component paints the selection band; row text is content-coloured, not
             // selection-coloured (slice-0063 band-only policy for data lists).
             c.setTextColor(theme::TEXT_PRIMARY());
 
+            // Label: SSID / device name, or the first three BD_ADDR octets when a BLE
+            // advertiser is unnamed, so distinct unnamed devices stay distinguishable.
+            char label[17];
+            if (isBle && net.ssid[0] == '\0') {
+                snprintf(label, sizeof(label), "%02X:%02X:%02X",
+                         net.bssid[0], net.bssid[1], net.bssid[2]);
+            } else {
+                strncpy(label, net.ssid, sizeof(label) - 1);
+                label[sizeof(label) - 1] = '\0';
+            }
             c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
-            char ssid[17];
-            strncpy(ssid, net.ssid, 16);
-            ssid[16] = '\0';
-            c.print(ssid);
+            c.print(label);
 
+            // Type/metadata column: a "BLE" tag marks an advertiser (channel 0 and WiFi
+            // security do not apply); a WiFi row keeps its channel and security.
             c.setCursor(c.width() - 90, y + theme::LIST_ROW_TEXT_DY);
-            c.printf("Ch%d", net.channel);
-
-            c.setCursor(c.width() - 60, y + theme::LIST_ROW_TEXT_DY);
-            c.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
+            if (isBle) {
+                c.setTextColor(theme::ACCENT());
+                c.print("BLE");
+            } else {
+                c.printf("Ch%d", net.channel);
+                c.setCursor(c.width() - 60, y + theme::LIST_ROW_TEXT_DY);
+                c.print(wifiSecurityToString(static_cast<WiFiSecurity>(net.security)));
+            }
 
             uint16_t rssiColor = getRSSIColor(net.rssi);
             c.setTextColor(rssiColor);

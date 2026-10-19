@@ -283,7 +283,7 @@ bool BleScannerScreen::handleInput(char key) {
 
 void BleScannerScreen::setupActionMenu(const BLEDeviceInfo& device) {
     actionMenu_.clearItems();
-    actionMenu_.setTitle((device.name.empty() || device.name == "Unknown" ? ble::addressToString(device.address) : device.name).c_str());
+    actionMenu_.setTitle((hasAdvertisedName(device) ? device.name : ble::addressToString(device.address)).c_str());
     
     actionMenu_.addItem('S', "Spoof Identity", true);
     

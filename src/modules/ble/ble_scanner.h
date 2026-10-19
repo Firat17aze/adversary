@@ -26,6 +26,17 @@ struct BLEDeviceInfo {
     uint32_t lastSeen;
 };
 
+// Placeholder stored in BLEDeviceInfo::name when the advertiser broadcasts no name (NimBLE
+// haveName() is false). It is a display stand-in, not a real name, so most advertisers carry
+// it; a consumer that wants to show the address instead must test hasAdvertisedName() rather
+// than name.empty(), which never fires while this stand-in is in force.
+constexpr const char* BLE_NAME_UNKNOWN = "Unknown";
+
+// True when the device advertised a usable name (not absent, not the BLE_NAME_UNKNOWN stand-in).
+inline bool hasAdvertisedName(const BLEDeviceInfo& device) {
+    return !device.name.empty() && device.name != BLE_NAME_UNKNOWN;
+}
+
 class BLEScanner : public NimBLEAdvertisedDeviceCallbacks {
 public:
     static BLEScanner& getInstance() {
