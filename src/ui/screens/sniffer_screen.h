@@ -24,11 +24,12 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
-#include <queue>
 
 #ifdef ESP32
 #include <Arduino.h>
 #include <M5GFX.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #endif
 
 namespace adversary {
@@ -37,14 +38,33 @@ namespace adversary {
 struct CapturedPacket;
 
 /**
- * @brief Queued packet for deferred SD writing
+ * @brief Upper bound on the frame bytes copied out of the WiFi-driver buffer per packet.
+ *
+ * Matches the truncation the retired QueuedPacket already applied, so pcap output is unchanged.
+ * Management frames (beacons/probes/deauth/EAPOL) sit well under this; longer data frames are
+ * truncated here as before.
  */
-struct QueuedPacket {
-    uint8_t data[512];
-    uint16_t length;
+constexpr uint16_t SNIFFER_FRAME_CAP = 512;
+
+/**
+ * @brief One captured frame copied out of the WiFi-driver task for the main loop.
+ *
+ * The promiscuous callback runs in the WiFi driver task and its frame buffer is valid only for the
+ * duration of the callback, so the bytes are copied here and the already-parsed header is carried
+ * alongside them. Instances cross from the WiFi task to the main loop by value over a FreeRTOS
+ * queue (slice-0078); nothing in it points at driver-owned memory.
+ */
+struct SniffedFrame {
+    uint8_t data[SNIFFER_FRAME_CAP];
+    uint16_t length;      ///< Bytes valid in data[], clamped to SNIFFER_FRAME_CAP
+    int8_t rssi;
+    uint8_t channel;
     uint32_t timestamp;
-    
-    QueuedPacket() : length(0), timestamp(0) {}
+    FrameType frameType;
+    uint8_t subtype;
+    uint8_t addr1[6];
+    uint8_t addr2[6];
+    uint8_t addr3[6];
 };
 
 /**
@@ -145,8 +165,16 @@ public:
     const CaptureStats& getStats() const { return m_stats; }
 
 private:
-    void onPacketReceived(const CapturedPacket& packet);
-    
+    // The WiFi-driver-task callback: copy the frame into a SniffedFrame and hand it to the main
+    // loop over m_frameQueue. Touches no shared std container (slice-0078).
+    void enqueueFrame(const CapturedPacket& packet);
+    // Main-loop side: drain m_frameQueue and run processFrame on each. All stats/log/pcap work
+    // lives on this one task (which also renders), so the std containers need no lock.
+    void drainFrameQueue();
+    // Classify one drained frame into stats, the packet log and the pcap file (formerly the body
+    // of the WiFi-task onPacketReceived, now reached only from the main loop).
+    void processFrame(const CapturedPacket& packet);
+
     void drawHeader(Canvas& canvas);
     void drawStats(Canvas& canvas);
     void drawChannelIndicator(Canvas& canvas, int16_t x, int16_t y);
@@ -171,17 +199,23 @@ private:
     const char* getModeName() const;
     void configureFilter();
     bool shouldCapturePacket(const CapturedPacket& packet) const;
-    void processPacketQueue();
-    
+
     PacketSniffer& m_sniffer;
     PcapWriter m_pcapWriter;
 
     CaptureStats m_stats;
     CaptureMode m_captureMode;
     
-    std::queue<QueuedPacket> m_packetQueue;
-    // static constexpr size_t MAX_QUEUE_SIZE = 50; // Removed duplicate
-    
+#ifdef ESP32
+    // Lock-free handoff from the WiFi-driver task (enqueueFrame) to the main loop (drainFrameQueue).
+    // Created in startCapture before the sniffer starts and deleted in stopCapture after it stops,
+    // so no enqueue can ever target a freed queue (slice-0078).
+    QueueHandle_t m_frameQueue = nullptr;
+#endif
+    // Frames dropped because the queue was full (main loop not draining fast enough under flood).
+    // Backpressure telemetry; capture keeps running, matching the old drop-on-full behaviour.
+    uint32_t m_droppedFrames = 0;
+
     bool m_hasTarget;
     char m_targetSsid[33];
     uint8_t m_targetBssid[6];
@@ -226,10 +260,14 @@ private:
     static constexpr uint32_t DEAUTH_FLOOD_THRESHOLD = 10;
     static constexpr uint32_t DEAUTH_WINDOW_MS = 1000;
     
-    // Queue size reduced from 50 to 10 to prevent OOM
-    // 10 packets * ~518 bytes = ~5KB peak
-    // 50 packets * ~518 bytes = ~26KB peak (CRITICAL FAIL)
-    static constexpr size_t MAX_QUEUE_SIZE = 10;
+    // Frame-queue depth. A busy 2.4 GHz channel delivers a few hundred frames/s (<1/ms); against a
+    // worst-case ~10 ms gap between update() drains that is ~3 frames in flight, so 16 is a >5x
+    // margin. sizeof(SniffedFrame) ~= 544 B, so the queue is one ~8.5 KB block allocated once at
+    // startCapture and freed at stopCapture, not per packet (slice-0078).
+    static constexpr size_t SNIFFER_FRAME_QUEUE_DEPTH = 16;
+    // Frames drained per update() call; = depth so a full queue clears in one pass under normal
+    // load, with residual frames carried to the next call rather than blocking the loop.
+    static constexpr size_t SNIFFER_FRAME_DRAIN_BUDGET = SNIFFER_FRAME_QUEUE_DEPTH;
     
     static constexpr int16_t HEADER_HEIGHT = 20;
     static constexpr int16_t STATUS_HEIGHT = 16;

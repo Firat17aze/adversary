@@ -87,9 +87,11 @@ void SnifferScreen::update()
     // Update sniffer (for channel hopping etc)
     m_sniffer.update();
     
-    // Process queued packets - write to SD in main loop context
-    if (m_capturing && m_saveToFile) {
-        processPacketQueue();
+    // Drain frames handed over from the WiFi-driver task and do all stats/log/pcap work here, on
+    // the main loop (slice-0078). Runs whenever capturing: the log and stats always update; the
+    // pcap write inside processFrame is itself gated on m_saveToFile.
+    if (m_capturing) {
+        drainFrameQueue();
     }
     
     // Check for channel changes
@@ -103,26 +105,68 @@ void SnifferScreen::update()
     }
 }
 
-void SnifferScreen::processPacketQueue()
+void SnifferScreen::enqueueFrame(const CapturedPacket& packet)
 {
-    // Process up to 10 packets per update to avoid blocking
-    int processed = 0;
-    while (!m_packetQueue.empty() && processed < 10) {
-        const QueuedPacket& pkt = m_packetQueue.front();
-        
-        if (m_pcapWriter.isOpen()) {
-            m_pcapWriter.writePacket(pkt.data, pkt.length, pkt.timestamp);
-            m_stats.bytesWritten = m_pcapWriter.getBytesWritten();
-        }
-        
-        m_packetQueue.pop();
+#ifdef ESP32
+    // Runs in the WiFi driver task. Copy the frame out of the driver-owned buffer (valid only for
+    // this call) and hand it to the main loop. This is the ONLY work done here: no std::vector,
+    // std::queue or m_stats access, so nothing the main loop also touches is mutated off-task.
+    if (!m_frameQueue) {
+        return;
+    }
+
+    SniffedFrame frame;
+    frame.length = (packet.length > SNIFFER_FRAME_CAP) ? SNIFFER_FRAME_CAP : packet.length;
+    memcpy(frame.data, packet.data, frame.length);
+    frame.rssi = packet.rssi;
+    frame.channel = packet.channel;
+    frame.timestamp = packet.timestamp;
+    frame.frameType = packet.frameType;
+    frame.subtype = packet.subtype;
+    memcpy(frame.addr1, packet.addr1, 6);
+    memcpy(frame.addr2, packet.addr2, 6);
+    memcpy(frame.addr3, packet.addr3, 6);
+
+    // The promiscuous callback is a WiFi driver *task*, not a hardware ISR (it already blocks on
+    // EventBus's mutex and allocates on the heap from here), so the task-API xQueueSend is correct.
+    // Zero block time: never stall the driver; drop and count when the main loop is behind.
+    if (xQueueSend(m_frameQueue, &frame, 0) != pdTRUE) {
+        m_droppedFrames++;
+    }
+#else
+    (void)packet;
+#endif
+}
+
+void SnifferScreen::drainFrameQueue()
+{
+#ifdef ESP32
+    if (!m_frameQueue) {
+        return;
+    }
+
+    SniffedFrame frame;
+    size_t processed = 0;
+    while (processed < SNIFFER_FRAME_DRAIN_BUDGET &&
+           xQueueReceive(m_frameQueue, &frame, 0) == pdTRUE) {
+        // Rebuild a CapturedPacket as a view over the frame's own (main-loop-owned) buffer, so the
+        // existing classification runs unchanged, now entirely on this task.
+        CapturedPacket packet;
+        packet.data = frame.data;
+        packet.length = frame.length;
+        packet.rssi = frame.rssi;
+        packet.channel = frame.channel;
+        packet.timestamp = frame.timestamp;
+        packet.frameType = frame.frameType;
+        packet.subtype = frame.subtype;
+        memcpy(packet.addr1, frame.addr1, 6);
+        memcpy(packet.addr2, frame.addr2, 6);
+        memcpy(packet.addr3, frame.addr3, 6);
+
+        processFrame(packet);
         processed++;
     }
-    
-    // Periodic flush every 100 packets
-    if (m_pcapWriter.isOpen() && m_pcapWriter.getPacketCount() % 100 == 0 && m_pcapWriter.getPacketCount() > 0) {
-        m_pcapWriter.flush();
-    }
+#endif
 }
 
 void SnifferScreen::setActive(bool active)
@@ -391,18 +435,35 @@ void SnifferScreen::startCapture()
     
     // Configure filter based on mode
     configureFilter();
-    
-    // Start sniffer with callback
-    auto callback = [this](const CapturedPacket& packet) {
-        this->onPacketReceived(packet);
-    };
-    
-    if (!m_sniffer.start(callback)) {
-        LOG_E("SNIFFER", "Failed to start sniffer");
+
+#ifdef ESP32
+    // Create the frame handoff queue before the sniffer starts, so the WiFi-task callback always
+    // has a live queue to send to (slice-0078). Fail loud: without it every frame would be dropped.
+    m_frameQueue = xQueueCreate(SNIFFER_FRAME_QUEUE_DEPTH, sizeof(SniffedFrame));
+    if (!m_frameQueue) {
+        LOG_E("SNIFFER", "Failed to allocate frame queue");
         m_pcapWriter.close();
         return;
     }
-    
+#endif
+    m_droppedFrames = 0;
+
+    // Start sniffer with callback. The callback runs in the WiFi driver task and only enqueues;
+    // all processing happens in drainFrameQueue on the main loop.
+    auto callback = [this](const CapturedPacket& packet) {
+        this->enqueueFrame(packet);
+    };
+
+    if (!m_sniffer.start(callback)) {
+        LOG_E("SNIFFER", "Failed to start sniffer");
+        m_pcapWriter.close();
+#ifdef ESP32
+        vQueueDelete(m_frameQueue);
+        m_frameQueue = nullptr;
+#endif
+        return;
+    }
+
     m_capturing = true;
     m_stats.currentChannel = m_sniffer.getChannel();
     m_needsRedraw = true;
@@ -413,25 +474,29 @@ void SnifferScreen::startCapture()
 void SnifferScreen::stopCapture()
 {
     if (!m_capturing) return;
-    
-    // Stop sniffer
+
+    // Stop the sniffer first: this disables promiscuous mode and clears the driver callback, so no
+    // further frame can be enqueued after it returns. Only then is it safe to drain and delete the
+    // queue (slice-0078). Ordering closes the use-after-free the crash backtrace walked through.
     m_sniffer.stop();
-    
-    // Process any remaining queued packets
-    while (!m_packetQueue.empty()) {
-        const QueuedPacket& pkt = m_packetQueue.front();
-        if (m_pcapWriter.isOpen()) {
-            m_pcapWriter.writePacket(pkt.data, pkt.length, pkt.timestamp);
-        }
-        m_packetQueue.pop();
-    }
-    
+
+    // Flush any frames still queued into the pcap file before closing it (drain budget == queue
+    // depth, so one pass empties it).
+    drainFrameQueue();
+
     // Close PCAP file
     if (m_pcapWriter.isOpen()) {
         m_pcapWriter.flush();
         m_pcapWriter.close();
     }
-    
+
+#ifdef ESP32
+    if (m_frameQueue) {
+        vQueueDelete(m_frameQueue);
+        m_frameQueue = nullptr;
+    }
+#endif
+
     m_capturing = false;
     m_needsRedraw = true;
     
@@ -590,8 +655,12 @@ bool SnifferScreen::shouldCapturePacket(const CapturedPacket& packet) const
     }
 }
 
-void SnifferScreen::onPacketReceived(const CapturedPacket& packet)
+void SnifferScreen::processFrame(const CapturedPacket& packet)
 {
+    // Runs on the main loop (from drainFrameQueue). This is the sole writer of m_stats,
+    // m_packetLog and the pcap file, and it shares that task with render(), so none of them needs a
+    // lock: the cross-task heap race the old WiFi-task onPacketReceived caused is gone (slice-0078).
+
     // Update statistics
     m_stats.totalPackets++;
     
@@ -623,19 +692,17 @@ void SnifferScreen::onPacketReceived(const CapturedPacket& packet)
         addPacketToLog(packet);
     }
     
-    // Queue packet for deferred SD write (avoid SPI bus contention in callback)
-    if (m_saveToFile && shouldCapturePacket(packet)) {
-        // Only queue if we have space (drop packets if queue is full)
-        if (m_packetQueue.size() < MAX_QUEUE_SIZE) {
-            QueuedPacket qpkt;
-            qpkt.length = (packet.length > sizeof(qpkt.data)) ? sizeof(qpkt.data) : packet.length;
-            memcpy(qpkt.data, packet.data, qpkt.length);
-            qpkt.timestamp = packet.timestamp;
-            m_packetQueue.push(qpkt);
+    // Write to the pcap file. This SD/SPI work was deferred off the WiFi driver task to here on
+    // purpose; packet.data/length already carry the SNIFFER_FRAME_CAP truncation from enqueueFrame.
+    if (m_saveToFile && shouldCapturePacket(packet) && m_pcapWriter.isOpen()) {
+        m_pcapWriter.writePacket(packet.data, packet.length, packet.timestamp);
+        m_stats.bytesWritten = m_pcapWriter.getBytesWritten();
+        // Periodic flush every 100 packets
+        if (m_pcapWriter.getPacketCount() % 100 == 0 && m_pcapWriter.getPacketCount() > 0) {
+            m_pcapWriter.flush();
         }
-        // If queue is full, packet is dropped (better than blocking/crashing)
     }
-    
+
     m_needsRedraw = true;
 }
 
@@ -755,7 +822,7 @@ void SnifferScreen::addPacketToLog(const CapturedPacket& packet)
     }
 
     // We only reach here while the log is following the live tail: the ingest gate in
-    // onPacketReceived stops appending the moment the operator scrolls up, so the ring freezes
+    // processFrame stops appending the moment the operator scrolls up, so the ring freezes
     // and the view stays readable (slice-0071). So ride the tail: pin the selection to the newest
     // row and let the model scroll it into view. setViewport was set by the last render.
     const int newCount = (int)m_packetLog.size();
