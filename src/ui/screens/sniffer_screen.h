@@ -152,6 +152,8 @@ private:
     void drawActionMenu(Canvas& canvas);
     
     void addPacketToLog(const CapturedPacket& packet);
+    // True while the log is pinned to its newest row; scrolling up freezes ingestion (slice-0071).
+    bool isLogFollowingTail() const;
     uint16_t getFrameTypeColor(PacketFrameType type) const;
     const char* getFrameTypeName(PacketFrameType type) const;
     
@@ -210,7 +212,10 @@ private:
     uint32_t m_deauthWindowStart;
     bool m_deauthFloodAlert;
     
-    static constexpr size_t PACKET_LOG_SIZE = 25; // Reduce from 50 (Save ~1.5KB)
+    // 50 entries at sizeof(PacketSummary)==40B = 2KB, reserved once at construction. Sized for
+    // scrollback: scrolling up freezes the ring (slice-0071), and 50 rows give the operator more
+    // captured history to page through while frozen than the previous 25.
+    static constexpr size_t PACKET_LOG_SIZE = 50;
     static constexpr uint32_t DEAUTH_FLOOD_THRESHOLD = 10;
     static constexpr uint32_t DEAUTH_WINDOW_MS = 1000;
     

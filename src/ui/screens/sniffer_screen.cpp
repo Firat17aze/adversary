@@ -620,8 +620,11 @@ void SnifferScreen::onPacketReceived(const CapturedPacket& packet)
         }
     }
     
-    // Add to packet log (if not paused)
-    if (!m_logPaused && shouldCapturePacket(packet)) {
+    // Append to the visible log only while it is following the live tail and not manually paused.
+    // Scrolling up off the newest row (or pressing Pause) freezes the ring so the operator can
+    // read it at any packet rate; stats, flood detection and SD capture below keep running
+    // regardless, so nothing real is lost while the display is frozen (slice-0071).
+    if (!m_logPaused && isLogFollowingTail() && shouldCapturePacket(packet)) {
         addPacketToLog(packet);
     }
     
@@ -639,6 +642,14 @@ void SnifferScreen::onPacketReceived(const CapturedPacket& packet)
     }
     
     m_needsRedraw = true;
+}
+
+bool SnifferScreen::isLogFollowingTail() const
+{
+    // The log rides the live tail only while the selection sits on the newest row. An empty log
+    // follows by definition so the first frames append (slice-0071).
+    const int count = m_packetLogList.itemCount();
+    return count == 0 || m_packetLogList.selectedIndex() >= count - 1;
 }
 
 void SnifferScreen::addPacketToLog(const CapturedPacket& packet)
@@ -740,23 +751,21 @@ void SnifferScreen::addPacketToLog(const CapturedPacket& packet)
         summary.frameType = PacketFrameType::DATA;
     }
     
-    // Add to ring buffer
+    // Add to ring buffer.
     if (m_packetLog.size() < PACKET_LOG_SIZE) {
         m_packetLog.push_back(summary);
     } else {
         m_packetLog[m_packetLogHead] = summary;
         m_packetLogHead = (m_packetLogHead + 1) % PACKET_LOG_SIZE;
     }
-    
-    // Auto-follow the tail when unpaused and the selection is already at (or next to) it. The model
-    // owns the scroll window, so setSelectedIndex pulls the newest row into view; setViewport was
-    // set by the last render, and re-derived on the next one.
+
+    // We only reach here while the log is following the live tail: the ingest gate in
+    // onPacketReceived stops appending the moment the operator scrolls up, so the ring freezes
+    // and the view stays readable (slice-0071). So ride the tail: pin the selection to the newest
+    // row and let the model scroll it into view. setViewport was set by the last render.
     const int newCount = (int)m_packetLog.size();
-    const bool following = !m_logPaused && m_packetLogList.selectedIndex() >= newCount - 2;
     m_packetLogList.setItemCount(newCount);
-    if (following) {
-        m_packetLogList.setSelectedIndex(newCount - 1);
-    }
+    m_packetLogList.setSelectedIndex(newCount - 1);
 }
 
 uint16_t SnifferScreen::getFrameTypeColor(PacketFrameType type) const
@@ -1053,8 +1062,15 @@ void SnifferScreen::drawPacketLog(Canvas& canvas) {
         canvas.setCursor(canvas.width() / 2 - 25, startY);
         canvas.print("[PAUSED]");
         startY += 12;
+    } else if (!isLogFollowingTail()) {
+        // Frozen by scrolling up off the tail. Reassure the operator capture is still running (the
+        // ring is only frozen for reading); returning to the newest row resumes the stream (slice-0071).
+        canvas.setTextColor(theme::ACCENT());
+        canvas.setCursor(canvas.width() / 2 - 60, startY);
+        canvas.print("[REVIEW - capturing]");
+        startY += 12;
     }
-    
+
     size_t logSize = m_packetLog.size();
     if (logSize == 0) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
