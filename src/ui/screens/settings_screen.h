@@ -18,6 +18,8 @@
 #include "../components/action_menu.h"
 #include "../components/footer_hints.h"
 #include "../components/text_input_popup.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "../theme_manager.h"
 #include "modules/storage/settings_manager.h"
 #include "modules/notification/notification_manager.h"
@@ -136,6 +138,12 @@ private:
     void drawHeader(Canvas& canvas, const char* title);
     void drawFooter(Canvas& canvas);
     void drawItems(Canvas& canvas);
+    // One visible row's content (no band: the shared list component paints the selection
+    // band; this overpaints WARNING only while editing). slice-0069.
+    void drawSettingRow(Canvas& canvas, const SettingItem& item, int16_t rowTopY,
+                        bool isSelected, bool editing, int16_t screenWidth);
+    void formatNumberValue(const SettingItem& item, char* out, size_t outSize) const;
+    int firstSelectableIndex() const;
     void buildSettingsList();
     void applyBrightness();
     
@@ -144,11 +152,11 @@ private:
     bool needsRedraw_;
     SettingsScreenState screenState_;
     
-    // List state for scroll/selection management
-    int selection_;
-    int scrollOffset_;
-    static constexpr int VISIBLE_ITEMS = 5;
-    static constexpr int16_t ROW_HEIGHT = 18;
+    // Selection + scroll window for the one settings list. The screen keeps its own
+    // non-selectable-row skip navigation and EDITING routing and drives this model by index;
+    // drawItems feeds it the live viewport each frame, so the cursor and scroll offset cannot
+    // drift and the viewport is no longer a hardcoded count (slice-0069).
+    ListScrollModel itemList_;
     
     // Settings items
     static constexpr int MAX_ITEMS = 50;  // API keys + Storage section
@@ -190,7 +198,6 @@ private:
     char timeSyncLabelBuf_[48];
     
     static constexpr int16_t HEADER_HEIGHT = 20;
-    static constexpr int16_t FOOTER_HEIGHT = 16;
     
     // Buffer for dynamic labels
     char savedSSIDLabel_[48];

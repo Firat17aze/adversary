@@ -36,6 +36,9 @@ const char* txSourceLabel(ir::IrTxSource src) {
 // Bound for a formatted feedback/description line; toasts truncate at 63.
 constexpr size_t MESSAGE_BUF = 64;
 
+// Baseline offset of row text within a LIST_ROW_HEIGHT (14px) row, centring the 8px font.
+constexpr int16_t LIST_ROW_TEXT_DY = 3;
+
 // Move a wrapping list cursor with ;/. and follow it with the scroll window.
 // Returns true iff @p key was an up/down key. (Same idiom as RadioScreen.)
 bool listNav(char key, int& selection, int count, int& scroll, int visible) {
@@ -63,8 +66,6 @@ IrRecordScreen::IrRecordScreen()
     , lastHintState_(MenuState::MAIN)
     , mainSelection_(0)
     , actionSelection_(0)
-    , fileSelection_(0)
-    , fileScroll_(0)
     , txSelection_(0)
     , captureStage_(0)
     , actionSignalValid_(false)
@@ -273,11 +274,12 @@ void IrRecordScreen::loadActionSignal() {
     // work and replay re-reads with its own guards), so we only flag it and let
     // the draw fall back to a placeholder — no toast on mere navigation.
     actionSignalValid_ = false;
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(codes_.size())) {
+    const int sel = codeList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(codes_.size())) {
         return;
     }
     char path[128];
-    fullPath(codes_[fileSelection_].name, path, sizeof(path));
+    fullPath(codes_[sel].name, path, sizeof(path));
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
@@ -294,12 +296,13 @@ void IrRecordScreen::loadActionSignal() {
 }
 
 void IrRecordScreen::replaySelected() {
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(codes_.size())) {
+    const int sel = codeList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(codes_.size())) {
         state_ = MenuState::CODE_LIST;
         return;
     }
     char path[128];
-    fullPath(codes_[fileSelection_].name, path, sizeof(path));
+    fullPath(codes_[sel].name, path, sizeof(path));
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
@@ -332,20 +335,19 @@ void IrRecordScreen::replaySelected() {
 
 void IrRecordScreen::deleteSelected() {
 #ifdef ESP32
-    if (fileSelection_ < 0 || fileSelection_ >= static_cast<int>(codes_.size())) {
+    const int sel = codeList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(codes_.size())) {
         state_ = MenuState::CODE_LIST;
         return;
     }
     char path[128];
-    fullPath(codes_[fileSelection_].name, path, sizeof(path));
+    fullPath(codes_[sel].name, path, sizeof(path));
     if (SD.remove(path)) showSuccessToast("Deleted");
     else showErrorToast("Delete failed");
 
     loadCodeList();
-    if (fileSelection_ >= static_cast<int>(codes_.size())) {
-        fileSelection_ = codes_.empty() ? 0 : static_cast<int>(codes_.size()) - 1;
-    }
-    fileScroll_ = 0;
+    // setItemCount re-clamps the selection into the shrunken list (slice-0069).
+    codeList_.setItemCount(static_cast<int>(codes_.size()));
     state_ = MenuState::CODE_LIST;
     needsRedraw_ = true;
 #endif
@@ -399,8 +401,8 @@ bool IrRecordScreen::handleInput(char key) {
                     }
                 } else if (mainSelection_ == 1) {
                     loadCodeList();
-                    fileSelection_ = 0;
-                    fileScroll_ = 0;
+                    codeList_.setItemCount(static_cast<int>(codes_.size()));
+                    codeList_.setSelectedIndex(0);
                     state_ = MenuState::CODE_LIST;
                 } else {
                     txSelection_ = static_cast<int>(txSource());
@@ -412,10 +414,8 @@ bool IrRecordScreen::handleInput(char key) {
             return true;
 
         case MenuState::CODE_LIST:
-            if (listNav(key, fileSelection_, static_cast<int>(codes_.size()),
-                        fileScroll_, VISIBLE_ROWS)) {
-                return true;
-            }
+            if (key == ';') { codeList_.moveUp(); return true; }
+            if (key == '.') { codeList_.moveDown(); return true; }
             if ((key == '\n' || key == '\r') && !codes_.empty()) {
                 actionSelection_ = 0;
                 loadActionSignal();
@@ -599,28 +599,27 @@ void IrRecordScreen::drawCaptureReview(Canvas& canvas) {
 }
 
 void IrRecordScreen::drawCodeList(Canvas& canvas) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT;
     canvas.setTextSize(1);
     if (codes_.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(x, y + 6);
+        canvas.setCursor(theme::PADDING_MD, HEADER_HEIGHT + 6);
         canvas.print("No saved codes");
         return;
     }
-    int end = fileScroll_ + VISIBLE_ROWS;
-    if (end > static_cast<int>(codes_.size())) end = static_cast<int>(codes_.size());
-    for (int i = fileScroll_; i < end; ++i) {
-        if (i == fileSelection_) {
-            canvas.fillRect(0, y, canvas.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y + 4);
-        canvas.printf("%.26s", codes_[i].name);
-        y += ROW_HEIGHT;
-    }
+    // Shared list core paints the band + proportional scrollbar; the viewport is derived
+    // from the live rect between the header and the footer (slice-0069). The callback draws
+    // row content only; selection is signalled by the band.
+    const int16_t listTop = HEADER_HEIGHT;
+    const int16_t listH =
+        static_cast<int16_t>(canvas.height() - ui::FOOTER_HEIGHT - listTop);
+    ScrollableList::render(
+        canvas, codeList_, 0, listTop, canvas.width(), listH, theme::LIST_ROW_HEIGHT,
+        [this](Canvas& c, int itemIndex, int16_t rowTopY, bool isSelected) {
+            c.setTextColor(isSelected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+            c.setCursor(theme::PADDING_MD, rowTopY + LIST_ROW_TEXT_DY);
+            c.printf("%.26s", codes_[itemIndex].name);
+        },
+        !footerHints_.hasFocus());  // dim the band when the footer holds focus
 }
 
 void IrRecordScreen::drawCodeAction(Canvas& canvas) {
@@ -629,7 +628,7 @@ void IrRecordScreen::drawCodeAction(Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.setTextColor(theme::ACCENT());
     canvas.setCursor(x, y);
-    canvas.printf("%.26s", codes_[fileSelection_].name);
+    canvas.printf("%.26s", codes_[codeList_.selectedIndex()].name);
     y += ROW_HEIGHT;
 
     const char* items[2] = {"Replay", "Delete"};
@@ -666,7 +665,7 @@ void IrRecordScreen::drawConfirm(Canvas& canvas, const char* question) {
     y += ROW_HEIGHT;
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(x, y);
-    canvas.printf("%.26s", codes_[fileSelection_].name);
+    canvas.printf("%.26s", codes_[codeList_.selectedIndex()].name);
     // The Yes/No/Cancel actions live in the footer hints (updateFooterHints).
 }
 

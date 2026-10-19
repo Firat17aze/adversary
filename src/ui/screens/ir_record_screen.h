@@ -23,6 +23,8 @@
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
 #include "../components/text_input_popup.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "../../modules/ir/ir_signal.h"
 #include "screen_interface.h"
 
@@ -110,8 +112,9 @@ private:
     MenuState lastHintState_;  // footer hints refreshed only when state_ changes
     int mainSelection_;      // 0=Learn 1=Saved 2=TX source
     int actionSelection_;    // 0=Replay 1=Delete
-    int fileSelection_;
-    int fileScroll_;
+    // Saved-codes list: selection + scroll window + wrap. drawCodeList feeds it the live
+    // viewport each frame; the three fixed caption-menus above stay on listNav (slice-0069).
+    ListScrollModel codeList_;
     int txSelection_;        // index while in TX_SOURCE_SELECT
     uint8_t captureStage_;   // ramps so "Listening" paints before the blocking RX
 
@@ -124,8 +127,10 @@ private:
     ui::FooterHints footerHints_;
 
     static constexpr int16_t HEADER_HEIGHT = 20;
-    static constexpr int16_t ROW_HEIGHT = theme::LIST_ITEM_HEIGHT;  // 20, the shared token
-    static constexpr int VISIBLE_ROWS = 5;
+    // Roomier caption-menu spacing for the three fixed menus (main / action / TX source).
+    // The scrolling saved-codes list uses theme::LIST_ROW_HEIGHT (14) instead, the token the
+    // theme doc reserves for single-line scrolling rows (slice-0064/0069).
+    static constexpr int16_t ROW_HEIGHT = theme::LIST_ITEM_HEIGHT;  // 20
     static constexpr uint32_t CAPTURE_WINDOW_MS = 8000;
     static constexpr uint8_t NAME_MAX_LEN = 24;
 };

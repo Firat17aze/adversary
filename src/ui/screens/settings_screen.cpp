@@ -26,13 +26,26 @@ static const char* capOverrideName(int32_t v) {
     }
 }
 
+namespace {
+// Settings-row layout for the single-line LIST_ROW_HEIGHT rows. Named so the right-aligned
+// value column visibly clears the scrollbar the shared list component now draws (slice-0069).
+constexpr int16_t ROW_TEXT_X = 8;          // x of a normal row's label
+constexpr int16_t HEADER_TEXT_X = 4;       // x of a section-header label (indented less)
+constexpr int16_t ROW_TEXT_DY = 3;         // text baseline offset within a 14px row
+constexpr int16_t CHAR_WIDTH_PX = 6;       // width of one size-1 glyph, for right-align
+constexpr int16_t VALUE_RIGHT_MARGIN = 8;  // gap from the right edge; wider than the scrollbar
+}  // namespace
+
+// A row the cursor can land on: headers and separators are display-only (slice-0069).
+static bool isSelectableRow(SettingType t) {
+    return t != SettingType::HEADER && t != SettingType::SEPARATOR;
+}
+
 SettingsScreen::SettingsScreen()
     : visible_(false)
     , shouldExit_(false)
     , needsRedraw_(true)
     , screenState_(SettingsScreenState::BROWSING)
-    , selection_(0)
-    , scrollOffset_(0)
     , itemCount_(0)
 {
 }
@@ -193,10 +206,20 @@ void SettingsScreen::buildSettingsList() {
     // Count selectable items (non-headers)
     selectableCount_ = 0;
     for (int i = 0; i < itemCount_; i++) {
-        if (items_[i].type != SettingType::HEADER && items_[i].type != SettingType::SEPARATOR) {
+        if (isSelectableRow(items_[i].type)) {
             selectableCount_++;
         }
     }
+
+    // Keep the shared list model's row count in sync on every rebuild (slice-0069).
+    itemList_.setItemCount(itemCount_);
+}
+
+int SettingsScreen::firstSelectableIndex() const {
+    for (int i = 0; i < itemCount_; i++) {
+        if (isSelectableRow(items_[i].type)) return i;
+    }
+    return 0;
 }
 
 void SettingsScreen::init() {
@@ -208,9 +231,14 @@ void SettingsScreen::show() {
     shouldExit_ = false;
     needsRedraw_ = true;
     screenState_ = SettingsScreenState::BROWSING;
-    selection_ = 1;  // Skip first header
-    scrollOffset_ = 0;
-    init();
+    init();  // builds the list and syncs itemList_'s row count
+    // Land the cursor past the leading section header. The real viewport is only known once
+    // drawItems measures the list rect, so assume every row fits here (viewport = itemCount):
+    // that pins the scroll offset at 0, so selecting row 1 does not scroll the header off the
+    // top (setSelectedIndex can only scroll down to reveal the cursor, never back up). The
+    // first render then sets the true viewport over this already-correct offset (slice-0069).
+    itemList_.setViewport(itemCount_);
+    itemList_.setSelectedIndex(firstSelectableIndex());
 }
 
 void SettingsScreen::hide() {
@@ -336,29 +364,22 @@ bool SettingsScreen::handleInput(char key) {
                 idx += dir;
                 if (idx < 0) idx = itemCount_ - 1;
                 else if (idx >= itemCount_) idx = 0;
-                SettingType t = items_[idx].type;
-                if (t != SettingType::HEADER && t != SettingType::SEPARATOR) return idx;
+                if (isSelectableRow(items_[idx].type)) return idx;
             }
             return from;
         };
         switch (key) {
-            case ';':  // Up (wraps to last)
-                selection_ = nextSelectable(selection_, -1);
-                if (selection_ < scrollOffset_) scrollOffset_ = selection_;
-                else if (selection_ >= scrollOffset_ + VISIBLE_ITEMS)
-                    scrollOffset_ = selection_ - VISIBLE_ITEMS + 1;
+            case ';':  // Up (wraps to last); the model scrolls the new row into view
+                itemList_.setSelectedIndex(nextSelectable(itemList_.selectedIndex(), -1));
                 return true;
 
             case '.':  // Down (wraps to first)
-                selection_ = nextSelectable(selection_, 1);
-                if (selection_ >= scrollOffset_ + VISIBLE_ITEMS)
-                    scrollOffset_ = selection_ - VISIBLE_ITEMS + 1;
-                else if (selection_ < scrollOffset_) scrollOffset_ = selection_;
+                itemList_.setSelectedIndex(nextSelectable(itemList_.selectedIndex(), 1));
                 return true;
-                
+
             case '\n':
             case '\r': {
-                int idx = selection_;
+                int idx = itemList_.selectedIndex();
                 if (items_[idx].type == SettingType::TOGGLE) {
                     if (items_[idx].valuePtr) {
                         *items_[idx].valuePtr = !(*items_[idx].valuePtr);
@@ -630,7 +651,7 @@ bool SettingsScreen::handleInput(char key) {
                 return true;
         }
     } else if (screenState_ == SettingsScreenState::EDITING) {
-        int idx = selection_;
+        int idx = itemList_.selectedIndex();
         auto& item = items_[idx];
         switch (key) {
             case ';':  // Decrease
@@ -715,16 +736,12 @@ void SettingsScreen::drawFooter(Canvas& canvas) {
     footerHints_.setHints({});
     
     static char countBuf[16];
-    int sel = selection_;
+    int sel = itemList_.selectedIndex();
     int selectablePos = 0;
     for (int i = 0; i < sel && i < itemCount_; i++) {
-        if (items_[i].type != SettingType::HEADER && items_[i].type != SettingType::SEPARATOR) {
-            selectablePos++;
-        }
+        if (isSelectableRow(items_[i].type)) selectablePos++;
     }
-    if (items_[sel].type != SettingType::HEADER && items_[sel].type != SettingType::SEPARATOR) {
-        selectablePos++;
-    }
+    if (isSelectableRow(items_[sel].type)) selectablePos++;
     snprintf(countBuf, sizeof(countBuf), "%d/%d", selectablePos, selectableCount_);
     footerHints_.setRightContent(countBuf);
     
@@ -732,114 +749,105 @@ void SettingsScreen::drawFooter(Canvas& canvas) {
 }
 
 void SettingsScreen::drawItems(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 2;
-    int16_t screenWidth = canvas.width();
-    const int16_t lineHeight = ROW_HEIGHT;
-    
+    const int16_t screenWidth = canvas.width();
+    const int16_t listTop = HEADER_HEIGHT + 2;
+    const int16_t listH =
+        static_cast<int16_t>(canvas.height() - ui::FOOTER_HEIGHT - listTop);
+    const bool editing = (screenState_ == SettingsScreenState::EDITING);
+
     canvas.setTextSize(1);
-    
-    int scrollOff = scrollOffset_;
-    int selectedIdx = selection_;
-    int endIdx = scrollOff + VISIBLE_ITEMS;
-    if (endIdx > itemCount_) endIdx = itemCount_;
-    
-    for (int i = scrollOff; i < endIdx; i++) {
-        const auto& item = items_[i];
-        bool selected = (i == selectedIdx);
-        bool editing = selected && (screenState_ == SettingsScreenState::EDITING);
-        
-        if (selected && item.type != SettingType::HEADER) {
-            canvas.fillRect(0, y - 1, screenWidth, lineHeight, 
-                           editing ? theme::WARNING() : theme::ACCENT());
-        }
-        
-        switch (item.type) {
-            case SettingType::HEADER:
-                canvas.setTextColor(theme::ACCENT());
-                canvas.setCursor(4, y + 3);
-                canvas.print(item.label);
-                break;
-                
-            case SettingType::NUMBER: {
-                canvas.setTextColor(theme::TEXT_PRIMARY());
-                canvas.setCursor(8, y + 3);
-                canvas.print(item.label);
-                
-                char valStr[20];
-                if (item.valuePtr == &tempToastPosition_) {
-                    const char* posLabels[] = {"Top", "Center", "Bottom"};
-                    int idx = *item.valuePtr;
-                    if (idx >= 0 && idx <= 2) {
-                        strncpy(valStr, posLabels[idx], sizeof(valStr) - 1);
-                    } else {
-                        snprintf(valStr, sizeof(valStr), "%d", idx);
-                    }
-                } else if (item.valuePtr == &tempKarmaRotationSpeed_) {
-                    const char* speedLabels[] = {"Fast", "Normal", "Slow"};
-                    int idx = *item.valuePtr;
-                    if (idx >= 0 && idx <= 2) {
-                        strncpy(valStr, speedLabels[idx], sizeof(valStr) - 1);
-                    } else {
-                        snprintf(valStr, sizeof(valStr), "%d", idx);
-                    }
-                } else if (item.valuePtr == &tempWardrivingRadioMode_) {
-                    const char* modeLabels[] = {"WiFi", "BLE", "Both"};
-                    int idx = *item.valuePtr;
-                    if (idx >= 0 && idx <= 2) {
-                        strncpy(valStr, modeLabels[idx], sizeof(valStr) - 1);
-                    } else {
-                        snprintf(valStr, sizeof(valStr), "%d", idx);
-                    }
-                } else {
-                    snprintf(valStr, sizeof(valStr), "%d%s", (int)*item.valuePtr, item.suffix);
-                }
-                int valWidth = strlen(valStr) * 6;
-                canvas.setCursor(screenWidth - valWidth - 8, y + 3);
-                canvas.setTextColor(editing ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY());
-                canvas.print(valStr);
-                break;
-            }
-                
-            case SettingType::TOGGLE: {
-                canvas.setTextColor(theme::TEXT_PRIMARY());
-                canvas.setCursor(8, y + 3);
-                canvas.print(item.label);
-                
-                bool isOn = item.valuePtr && (*item.valuePtr != 0);
-                canvas.setCursor(screenWidth - 24, y + 3);
-                canvas.setTextColor(isOn ? theme::SUCCESS() : theme::TEXT_DISABLED());
-                canvas.print(isOn ? "ON" : "OFF");
-                break;
-            }
-                
-            case SettingType::INFO:
-            case SettingType::ACTION:
-                canvas.setTextColor(editing ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY());
-                canvas.setCursor(8, y + 3);
-                canvas.print(item.label);
-                break;
-                
-            case SettingType::SEPARATOR:
-                break;
-        }
-        
-        y += lineHeight;
+
+    // The shared list core derives the viewport from this live rect (no more hardcoded count,
+    // no dead space under the list), paints the selection band, and draws the one proportional
+    // scrollbar thumb. The callback draws row content only; the selected header never gets a
+    // band because the cursor never lands on one (slice-0069).
+    ScrollableList::render(
+        canvas, itemList_, 0, listTop, screenWidth, listH, theme::LIST_ROW_HEIGHT,
+        [this, screenWidth, editing](Canvas& c, int itemIndex, int16_t rowTopY,
+                                     bool isSelected) {
+            drawSettingRow(c, items_[itemIndex], rowTopY, isSelected, editing, screenWidth);
+        },
+        !footerHints_.hasFocus());  // dim the band when the footer holds focus
+}
+
+void SettingsScreen::drawSettingRow(Canvas& canvas, const SettingItem& item, int16_t rowTopY,
+                                    bool isSelected, bool editing, int16_t screenWidth) {
+    const bool rowEditing = isSelected && editing;
+    if (rowEditing) {
+        // Reuse the selected row's band in WARNING while editing: a semantic cue (not the
+        // normal selection colour) that ;/. now change the value, not the cursor (slice-0069).
+        canvas.fillRect(0, rowTopY, screenWidth, theme::LIST_ROW_HEIGHT, theme::WARNING());
     }
-    
-    // Draw vertical scrollbar when items exceed visible count
-    if (itemCount_ > VISIBLE_ITEMS) {
-        int16_t barX = screenWidth - 5;
-        int16_t barY = HEADER_HEIGHT + 2;
-        int16_t barHeight = VISIBLE_ITEMS * lineHeight - 4;
-        
-        canvas.fillRect(barX, barY, 4, barHeight, theme::BG_TERTIARY());
-        
-        int16_t thumbHeight = (VISIBLE_ITEMS * barHeight) / itemCount_;
-        if (thumbHeight < 6) thumbHeight = 6;
-        
-        int maxScroll = itemCount_ - VISIBLE_ITEMS;
-        int16_t thumbY = barY + (scrollOff * (barHeight - thumbHeight)) / maxScroll;
-        canvas.fillRect(barX, thumbY, 4, thumbHeight, theme::ACCENT());
+    const int16_t textY = rowTopY + ROW_TEXT_DY;
+
+    switch (item.type) {
+        case SettingType::HEADER:
+            canvas.setTextColor(theme::ACCENT());
+            canvas.setCursor(HEADER_TEXT_X, textY);
+            canvas.print(item.label);
+            break;
+
+        case SettingType::NUMBER: {
+            canvas.setTextColor(theme::TEXT_PRIMARY());
+            canvas.setCursor(ROW_TEXT_X, textY);
+            canvas.print(item.label);
+
+            char valStr[20];
+            formatNumberValue(item, valStr, sizeof(valStr));
+            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * CHAR_WIDTH_PX;
+            canvas.setCursor(screenWidth - VALUE_RIGHT_MARGIN - valWidth, textY);
+            canvas.setTextColor(rowEditing ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY());
+            canvas.print(valStr);
+            break;
+        }
+
+        case SettingType::TOGGLE: {
+            canvas.setTextColor(theme::TEXT_PRIMARY());
+            canvas.setCursor(ROW_TEXT_X, textY);
+            canvas.print(item.label);
+
+            const bool isOn = item.valuePtr && (*item.valuePtr != 0);
+            const char* valStr = isOn ? "ON" : "OFF";
+            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * CHAR_WIDTH_PX;
+            canvas.setCursor(screenWidth - VALUE_RIGHT_MARGIN - valWidth, textY);
+            canvas.setTextColor(isOn ? theme::SUCCESS() : theme::TEXT_DISABLED());
+            canvas.print(valStr);
+            break;
+        }
+
+        case SettingType::INFO:
+        case SettingType::ACTION:
+            canvas.setTextColor(rowEditing ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY());
+            canvas.setCursor(ROW_TEXT_X, textY);
+            canvas.print(item.label);
+            break;
+
+        case SettingType::SEPARATOR:
+            break;
+    }
+}
+
+void SettingsScreen::formatNumberValue(const SettingItem& item, char* out,
+                                       size_t outSize) const {
+    // A few NUMBER rows are small enums shown as words, matched by the temp*_ pointer they
+    // edit (slice-0002/ADR-0060); everything else prints its number plus suffix.
+    const int idx = item.valuePtr ? static_cast<int>(*item.valuePtr) : 0;
+    const char* word = nullptr;
+    if (item.valuePtr == &tempToastPosition_) {
+        static const char* kLabels[] = {"Top", "Center", "Bottom"};
+        if (idx >= 0 && idx <= 2) word = kLabels[idx];
+    } else if (item.valuePtr == &tempKarmaRotationSpeed_) {
+        static const char* kLabels[] = {"Fast", "Normal", "Slow"};
+        if (idx >= 0 && idx <= 2) word = kLabels[idx];
+    } else if (item.valuePtr == &tempWardrivingRadioMode_) {
+        static const char* kLabels[] = {"WiFi", "BLE", "Both"};
+        if (idx >= 0 && idx <= 2) word = kLabels[idx];
+    }
+    if (word) {
+        strncpy(out, word, outSize - 1);
+        out[outSize - 1] = '\0';
+    } else {
+        snprintf(out, outSize, "%d%s", idx, item.suffix ? item.suffix : "");
     }
 }
 
