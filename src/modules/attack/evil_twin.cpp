@@ -127,7 +127,7 @@ bool EvilTwin::start() {
     
     // Start soft AP - open network (no password)
     LOG_I("EVILTWIN", "Creating AP: %s on channel %d", targetSSID_, targetChannel_);
-    bool apStarted = WiFi.softAP(targetSSID_, nullptr, targetChannel_, 0, 8);
+    bool apStarted = WiFi.softAP(targetSSID_, nullptr, targetChannel_, 0, EVIL_TWIN_MAX_CLIENTS);
 
     if (!apStarted) {
         LOG_E("EVILTWIN", "Failed to start SoftAP!");

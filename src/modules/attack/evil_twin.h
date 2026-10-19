@@ -7,6 +7,13 @@
 
 namespace attack {
 
+// Maximum clients the rogue SoftAP admits, and therefore the size of any buffer that reads
+// them back. The SoftAP max_connection, the display's client array, and the getClients()
+// request must all agree: a drift truncates the clients list (see slice-0076). The ESP32 SDK
+// caps SoftAP at 10 regardless; 8 is our chosen ceiling. Distinct from config::MAX_CLIENTS
+// (100), which bounds other modules' client tracking, not this AP.
+constexpr uint8_t EVIL_TWIN_MAX_CLIENTS = 8;
+
 /**
  * @brief Evil Twin attack state
  */

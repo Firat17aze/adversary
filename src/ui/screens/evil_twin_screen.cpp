@@ -379,7 +379,7 @@ bool EvilTwinScreen::handleInput(char key) {
             if (screenState_ == EvilTwinScreenState::RUNNING ||
                 screenState_ == EvilTwinScreenState::SNIFFER) {
                 screenState_ = EvilTwinScreenState::CLIENTS;
-                clientScrollPos_ = 0;
+                clientList_.setSelectedIndex(0);
                 return true;
             }
             break;
@@ -398,12 +398,13 @@ bool EvilTwinScreen::handleInput(char key) {
                 credentialScrollPos_--;
                 return true;
             }
-            if (screenState_ == EvilTwinScreenState::CLIENTS && clientScrollPos_ > 0) {
-                clientScrollPos_--;
+            if (screenState_ == EvilTwinScreenState::CLIENTS) {
+                // The model wraps at the ends; render feeds it the live client count each frame.
+                clientList_.moveUp();
                 return true;
             }
             break;
-            
+
         case '.':  // Down
             if (screenState_ == EvilTwinScreenState::CONFIG) {
                 if (configSelection_ < CONFIG_OPTION_COUNT - 1) {
@@ -417,6 +418,10 @@ bool EvilTwinScreen::handleInput(char key) {
                     credentialScrollPos_++;
                     return true;
                 }
+            }
+            if (screenState_ == EvilTwinScreenState::CLIENTS) {
+                clientList_.moveDown();
+                return true;
             }
             break;
             
@@ -766,35 +771,51 @@ void EvilTwinScreen::renderCredentials(Canvas& canvas) {
 void EvilTwinScreen::renderClients(Canvas& canvas) {
 #ifdef ESP32
     canvas.fillScreen(theme::BG_PRIMARY());
-    ap::APClient clients[8];
-    uint8_t clientCount = evilTwin_.getClients(clients, 8);
-    
+
+    // Read the live client set fresh each frame. The buffer is sized to the AP cap, so it can
+    // hold every admitted client; the local array stays in scope for the synchronous
+    // ScrollableList::render below, which paints rows out of it.
+    ap::APClient clients[attack::EVIL_TWIN_MAX_CLIENTS];
+    uint8_t clientCount = evilTwin_.getClients(clients, attack::EVIL_TWIN_MAX_CLIENTS);
+
     char centerStr[8];
     snprintf(centerStr, sizeof(centerStr), "%d", clientCount);
     ui::StatusBar::render(canvas, "Clients", centerStr);
-    
-    int16_t y = 28;
-    
+
+    const int16_t itemHeight = theme::LIST_ROW_HEIGHT;
+    const int16_t listY = ui::STATUS_BAR_HEIGHT + 1;                         // sit just under the bar
+    const int16_t listHeight = canvas.height() - listY - ui::FOOTER_HEIGHT;  // ...down to the footer
+
+    clientList_.setItemCount(clientCount);
+
     if (clientCount == 0) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(10, 50);
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(4, listY + listHeight / 2);
         canvas.print("No clients connected");
     } else {
-        for (uint8_t i = 0; i < clientCount && y < config::SCREEN_HEIGHT - 30; i++) {
-            const auto& client = clients[i];
-            
-            char macStr[18];
-            utils::formatMacBytes(client.mac, macStr, sizeof(macStr));
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-            canvas.setCursor(10, y);
-            canvas.print(macStr);
-            
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-            canvas.printf(" %ddBm", client.rssi);
-            y += 14;
-        }
+        canvas.setTextSize(1);
+        // Same read-only shared-list idiom as the wardriving network log (slice-0074): the
+        // component derives the visible-row count, keeps the selection on screen, and draws the
+        // scrollbar; this callback paints one client row. No ENTER action yet (target-picker
+        // feature is on the ledger), so the selection is navigation-only.
+        ScrollableList::render(canvas, clientList_, 0, listY, canvas.width(), listHeight, itemHeight,
+            [&clients](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
+                const auto& client = clients[idx];
+
+                // Row text is content-coloured, not selection-coloured (slice-0063 band-only
+                // policy for data lists); the component paints the selection band.
+                char macStr[18];
+                utils::formatMacBytes(client.mac, macStr, sizeof(macStr));
+                c.setTextColor(theme::TEXT_PRIMARY());
+                c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
+                c.print(macStr);
+
+                c.setTextColor(theme::TEXT_SECONDARY());
+                c.setCursor(c.width() - 44, y + theme::LIST_ROW_TEXT_DY);
+                c.printf("%ddBm", client.rssi);
+            });
     }
-    
+
     // Footer hints
     footerHints_.setHints({});
     footerHints_.render(canvas);

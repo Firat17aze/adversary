@@ -17,6 +17,8 @@
 #include "ui/components/text_input_popup.h"
 #include "ui/components/toast_manager.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include "config/config.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
@@ -107,8 +109,13 @@ private:
     uint32_t credentialHandlerId_ = 0;  // EventBus subscription
     
     size_t credentialScrollPos_ = 0;
-    size_t clientScrollPos_ = 0;
-    
+
+    // Selection + scroll window for the connected-clients list. Same shared read-only idiom as
+    // the wardriving network log: the renderer feeds it the live client count each frame and it
+    // keeps the selection on screen and wraps at the ends (slice-0076, replaces the dead
+    // clientScrollPos_).
+    ListScrollModel clientList_;
+
     // Config options
     static constexpr int CONFIG_OPTION_COUNT = 7;
     int configSelection_ = 0;
