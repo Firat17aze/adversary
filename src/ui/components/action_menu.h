@@ -213,10 +213,12 @@ void ActionMenu::render(Canvas& canvas) {
     for (size_t i = 0; i < items_.size(); i++) {
         const auto& item = items_[i];
         
-        // Highlight selected item
+        // Highlight selected item with the house band (slice-0063): a BG_SELECTED() band and
+        // content-coloured text, not the old ACCENT() fill with inverted text. Shared by all
+        // ActionMenu popups, so this is the one place the modal selected-row style is set.
         if (static_cast<int>(i) == selectedIndex_) {
-            canvas.fillRect(menuX + 4, y - 4, menuWidth - 8, ITEM_HEIGHT, theme::ACCENT());
-            canvas.setTextColor(theme::BG_PRIMARY());
+            canvas.fillRect(menuX + 4, y - 4, menuWidth - 8, ITEM_HEIGHT, theme::BG_SELECTED());
+            canvas.setTextColor(theme::TEXT_PRIMARY());
         } else if (!item.enabled) {
             canvas.setTextColor(theme::TEXT_DISABLED());
         } else {

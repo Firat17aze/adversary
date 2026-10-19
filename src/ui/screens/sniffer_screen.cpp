@@ -32,8 +32,6 @@ SnifferScreen::SnifferScreen()
     , m_screenState(SnifferScreenState::STATS)
     , m_packetLogHead(0)
     , m_logPaused(false)
-    , m_actionMenuSelection(0)
-    , m_actionCount(0)
     , m_deauthCount(0)
     , m_deauthWindowStart(0)
     , m_deauthFloodAlert(false)
@@ -42,7 +40,18 @@ SnifferScreen::SnifferScreen()
     memset(m_targetBssid, 0, sizeof(m_targetBssid));
     m_stats.reset();
     m_packetLog.reserve(PACKET_LOG_SIZE);
-    memset(m_availableActions, 0, sizeof(m_availableActions));
+
+    // Wire the shared quick-action overlay once. Selecting a row (ENTER or a shortcut key) maps
+    // the shortcut back to a PacketAction and runs the unchanged, native-tested policy; dismissing
+    // (ESC) just repaints the packet log underneath.
+    actionMenu_.setTitle("Quick Actions");
+    actionMenu_.setOnAction([this](char shortcut) {
+        executeAction(actionFromShortcut(shortcut));
+        m_needsRedraw = true;
+    });
+    actionMenu_.setOnDismiss([this]() {
+        m_needsRedraw = true;
+    });
 }
 
 SnifferScreen::~SnifferScreen()
@@ -197,6 +206,14 @@ bool SnifferScreen::handleInput(char key)
 {
     m_needsRedraw = true;
 
+    // While the quick-action overlay is up it owns all input, like every other ActionMenu consumer
+    // (slice-0077). Keys are consumed whether or not the menu mapped them, so none leaks to the
+    // packet log underneath.
+    if (actionMenu_.isVisible()) {
+        actionMenu_.handleInput(key);
+        return true;
+    }
+
     // Footer hints: focus navigation + action dispatch
     {
         char footerAction = 0;
@@ -209,20 +226,13 @@ bool SnifferScreen::handleInput(char key)
     switch (key) {
         case '\n':  // Enter - context-dependent action
         case '\r':
-            if (m_screenState == SnifferScreenState::ACTION_MENU) {
-                // Execute selected action
-                executeAction(m_availableActions[m_actionMenuSelection]);
-                m_screenState = SnifferScreenState::PACKET_LOG;
-                m_needsRedraw = true;
-            } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
                 // Snapshot the selected packet now: the ring mutates in place and auto-scroll can
                 // move the selection while the menu is open, so the action must act on this copy.
                 // The list holds an oldest-first display row; resolve it to its physical slot (slice-0070).
                 m_selectedPacket = m_packetLog[snifferLogPhysicalIndex(m_packetLogHead, m_packetLog.size(),
                                                                        m_packetLogList.selectedIndex())];
-                buildActionList(m_selectedPacket);
-                m_actionMenuSelection = 0;
-                m_screenState = SnifferScreenState::ACTION_MENU;
+                buildActionList(m_selectedPacket);  // opens the overlay iff the frame type affords an action
                 m_needsRedraw = true;
             } else {
                 // Default: toggle capture
@@ -232,12 +242,7 @@ bool SnifferScreen::handleInput(char key)
             
         case '`':   // Back/escape
         case 27:    // ESC
-            if (m_screenState == SnifferScreenState::ACTION_MENU) {
-                m_screenState = SnifferScreenState::PACKET_LOG;
-                m_needsRedraw = true;
-                return true;
-            }
-            // Exit to menu from top-level states
+            // The overlay, when open, consumed ESC above; here it always exits to the menu.
             m_shouldExit = true;
             return true;
             
@@ -264,26 +269,16 @@ bool SnifferScreen::handleInput(char key)
             }
             return true;
             
-        case ';':   // Up - navigate packet log or action menu
-            if (m_screenState == SnifferScreenState::ACTION_MENU) {
-                if (m_actionMenuSelection > 0) {
-                    m_actionMenuSelection--;
-                    m_needsRedraw = true;
-                }
-            } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+        case ';':   // Up - navigate packet log (the overlay handles its own nav above)
+            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
                 m_packetLogList.setItemCount((int)m_packetLog.size());
                 m_packetLogList.moveUp();  // wraps to the last row at the top
                 m_needsRedraw = true;
             }
             return true;
 
-        case '.':   // Down - navigate packet log or action menu
-            if (m_screenState == SnifferScreenState::ACTION_MENU) {
-                if (m_actionMenuSelection < m_actionCount - 1) {
-                    m_actionMenuSelection++;
-                    m_needsRedraw = true;
-                }
-            } else if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+        case '.':   // Down - navigate packet log (the overlay handles its own nav above)
+            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
                 m_packetLogList.setItemCount((int)m_packetLog.size());
                 m_packetLogList.moveDown();  // wraps to the first row at the bottom
                 m_needsRedraw = true;
@@ -800,39 +795,81 @@ const char* SnifferScreen::getFrameTypeName(PacketFrameType type) const
     }
 }
 
+// The PacketAction <-> shortcut key mapping, in one place so buildActionList (forward) and the
+// menu callback (reverse) can never disagree. Shortcuts follow the scanner convention (D/H/T)
+// plus K for Karma. CANCEL carries no row: the shared menu's ESC/backtick already dismisses.
+namespace {
+struct SnifferActionKey { PacketAction action; char shortcut; };
+constexpr SnifferActionKey SNIFFER_ACTION_KEYS[] = {
+    { PacketAction::HANDSHAKE_CAPTURE, 'H' },
+    { PacketAction::DEAUTH_ATTACK,     'D' },
+    { PacketAction::EVIL_TWIN,         'T' },
+    { PacketAction::KARMA_ATTACK,      'K' },
+};
+} // namespace
+
 void SnifferScreen::buildActionList(const PacketSummary& packet)
 {
-    m_actionCount = 0;
-    
+    actionMenu_.clearItems();
+
+    // Frame-type-conditional action set. The conditionality lives here in the caller, not in the
+    // shared component, exactly as scanner/ble_scanner pick their own items (slice-0077).
+    int added = 0;
+    auto add = [this, &added](PacketAction action) {
+        actionMenu_.addItem(getActionShortcut(action), getActionName(action), true);
+        ++added;
+    };
+
     switch (packet.frameType) {
         case PacketFrameType::BEACON:
         case PacketFrameType::PROBE_RESP:
             // Beacon/Probe Response - AP actions
-            m_availableActions[m_actionCount++] = PacketAction::HANDSHAKE_CAPTURE;
-            m_availableActions[m_actionCount++] = PacketAction::DEAUTH_ATTACK;
-            m_availableActions[m_actionCount++] = PacketAction::EVIL_TWIN;
+            add(PacketAction::HANDSHAKE_CAPTURE);
+            add(PacketAction::DEAUTH_ATTACK);
+            add(PacketAction::EVIL_TWIN);
             break;
-            
+
         case PacketFrameType::PROBE_REQ:
             // Probe Request - client actions
-            m_availableActions[m_actionCount++] = PacketAction::KARMA_ATTACK;
+            add(PacketAction::KARMA_ATTACK);
             break;
-            
+
         case PacketFrameType::EAPOL:
             // EAPOL - handshake actions
-            m_availableActions[m_actionCount++] = PacketAction::HANDSHAKE_CAPTURE;
+            add(PacketAction::HANDSHAKE_CAPTURE);
             break;
-            
+
         case PacketFrameType::DEAUTH:
-            // Deauth - detection info only for now
-            break;
-            
         default:
+            // No attack for these frame types.
             break;
     }
-    
-    // Always add cancel
-    m_availableActions[m_actionCount++] = PacketAction::CANCEL;
+
+    // Open the overlay only when the packet actually affords an action; a frame type with none no
+    // longer pops a useless Cancel-only menu (the old hand-rolled version always did).
+    if (added > 0) {
+        actionMenu_.show();
+    }
+}
+
+char SnifferScreen::getActionShortcut(PacketAction action)
+{
+    for (const auto& key : SNIFFER_ACTION_KEYS) {
+        if (key.action == action) return key.shortcut;
+    }
+    return '?';  // unreachable for any action buildActionList adds
+}
+
+PacketAction SnifferScreen::actionFromShortcut(char shortcut)
+{
+    char upper = (shortcut >= 'a' && shortcut <= 'z') ? static_cast<char>(shortcut - 32) : shortcut;
+    for (const auto& key : SNIFFER_ACTION_KEYS) {
+        if (key.shortcut == upper) return key.action;
+    }
+    // The component only reports a shortcut it rendered, so an unmatched key means the table and
+    // the addItem() calls drifted: fail loud instead of silently launching the wrong attack.
+    LOG_E("SNIFFER", "Unknown action shortcut '%c'", shortcut);
+    return PacketAction::CANCEL;  // makeSnifferAttackTarget() rejects CANCEL -> no-op
 }
 
 const char* SnifferScreen::getActionName(PacketAction action) const
@@ -891,12 +928,14 @@ void SnifferScreen::render(Canvas& canvas) {
         case SnifferScreenState::PACKET_LOG:
             drawPacketLog(canvas);
             break;
-        case SnifferScreenState::ACTION_MENU:
-            drawPacketLog(canvas);
-            drawActionMenu(canvas);
-            break;
     }
-    
+
+    // The quick-action overlay draws its own full-screen backdrop on top of the packet log
+    // (shared ui::ActionMenu, slice-0077). Opened only from PACKET_LOG, so the log is underneath.
+    if (actionMenu_.isVisible()) {
+        actionMenu_.render(canvas);
+    }
+
     // Set dynamic hints based on state
     if (m_screenState == SnifferScreenState::PACKET_LOG) {
         footerHints_.setHints({
@@ -1152,42 +1191,6 @@ void SnifferScreen::drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt,
     (void)canvas;
     (void)pkt;
     (void)y;
-#endif
-}
-
-void SnifferScreen::drawActionMenu(Canvas& canvas) {
-#ifdef ESP32
-    int16_t menuWidth = 140;
-    int16_t rowHeight = 16;
-    int16_t menuHeight = (m_actionCount + 1) * rowHeight + 8;
-    int16_t menuX = (canvas.width() - menuWidth) / 2;
-    int16_t menuY = (canvas.height() - menuHeight) / 2;
-    
-    canvas.fillRect(menuX - 2, menuY - 2, menuWidth + 4, menuHeight + 4, theme::BG_PRIMARY());
-    canvas.fillRect(menuX, menuY, menuWidth, menuHeight, theme::BG_SECONDARY());
-    canvas.drawRect(menuX, menuY, menuWidth, menuHeight, theme::ACCENT());
-    
-    canvas.setTextSize(1);
-    canvas.setTextColor(theme::ACCENT());
-    canvas.setCursor(menuX + 6, menuY + 4);
-    canvas.print("Quick Actions");
-    
-    int16_t y = menuY + rowHeight + 4;
-    for (size_t i = 0; i < m_actionCount; i++) {
-        bool selected = (i == m_actionMenuSelection);
-        
-        if (selected) {
-            canvas.fillRect(menuX + 2, y - 1, menuWidth - 4, rowHeight - 2, theme::BG_SELECTED());
-        }
-        
-        canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
-        canvas.setCursor(menuX + 8, y + 2);
-        canvas.print(getActionName(m_availableActions[i]));
-        
-        y += rowHeight;
-    }
-#else
-    (void)canvas;
 #endif
 }
 

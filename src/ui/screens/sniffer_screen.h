@@ -18,6 +18,7 @@
 #include "ui/components/footer_hints.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
+#include "ui/components/action_menu.h"
 #include "screen_interface.h"
 #include "sniffer_types.h"
 #include <cstdint>
@@ -83,8 +84,10 @@ struct CaptureStats {
  */
 enum class SnifferScreenState : uint8_t {
     STATS,
-    PACKET_LOG,
-    ACTION_MENU
+    PACKET_LOG
+    // The quick-action overlay is no longer a screen state: it renders through the shared
+    // ui::ActionMenu and is gated on actionMenu_.isVisible(), the same way scanner_screen does
+    // (slice-0077). The base state stays PACKET_LOG while the menu overlays it.
 };
 
 // PacketAction now lives in sniffer_types.h (shared with the native-tested sniffer_actions policy).
@@ -149,8 +152,7 @@ private:
     void drawChannelIndicator(Canvas& canvas, int16_t x, int16_t y);
     void drawPacketLog(Canvas& canvas);
     void drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, int16_t y);
-    void drawActionMenu(Canvas& canvas);
-    
+
     void addPacketToLog(const CapturedPacket& packet);
     // True while the log is pinned to its newest row; scrolling up freezes ingestion (slice-0071).
     bool isLogFollowingTail() const;
@@ -159,6 +161,11 @@ private:
     
     void buildActionList(const PacketSummary& packet);
     const char* getActionName(PacketAction action) const;
+    // The shared ActionMenu identifies rows by a shortcut char; these map it to and from our
+    // PacketAction enum through one table (slice-0077). actionFromShortcut fails loud on an
+    // unknown key: the component only ever reports a shortcut it rendered.
+    static char getActionShortcut(PacketAction action);
+    static PacketAction actionFromShortcut(char shortcut);
     void executeAction(PacketAction action);
     
     const char* getModeName() const;
@@ -204,10 +211,10 @@ private:
     // move the selection while the menu is open, so a live index would target a different packet.
     PacketSummary m_selectedPacket;
 
-    size_t m_actionMenuSelection;
-    PacketAction m_availableActions[6];
-    size_t m_actionCount;
-    
+    // The packet-log quick-action overlay, shared with scanner/ble_scanner/wardriving/etc.
+    // buildActionList() fills it per frame type and shows it; gated on isVisible() (slice-0077).
+    ui::ActionMenu actionMenu_;
+
     uint32_t m_deauthCount;
     uint32_t m_deauthWindowStart;
     bool m_deauthFloodAlert;
