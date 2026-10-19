@@ -123,8 +123,16 @@ void WardrivingScreen::update() {
     
     uint32_t now = millis();
 
+    // The Network Log is a live overlay on a running session, not a mode that pauses it, so the
+    // scan pipeline is driven off the session state underneath the view (returnState_ when the
+    // log is open). Otherwise opening the log halts scanning/harvesting and the list freezes
+    // until the operator backs out and re-enters; this keeps it refreshing in place like the
+    // scanner/sniffer logs.
+    const WardrivingState sessionState =
+        (state_ == WardrivingState::NETWORK_LOG) ? returnState_ : state_;
+
     // Only process WiFi scanning when session is active (not during SAVING/IDLE)
-    if (state_ == WardrivingState::SCANNING || state_ == WardrivingState::PAUSED) {
+    if (sessionState == WardrivingState::SCANNING || sessionState == WardrivingState::PAUSED) {
         // Process wardriving state machine (triggers WiFi scans)
         auto& manager = wardriving::WardrivingManager::getInstance();
         manager.update();
@@ -137,7 +145,7 @@ void WardrivingScreen::update() {
     // Harvest both scan sources into the live log (rate limited). The manager owns the CSV
     // ingest; this is the parallel display path, so BLE is read here too or the live list
     // would show only WiFi while the CSV records both (slice-0075).
-    if (state_ == WardrivingState::SCANNING && now - lastUpdateMs_ >= LOG_HARVEST_INTERVAL_MS) {
+    if (sessionState == WardrivingState::SCANNING && now - lastUpdateMs_ >= LOG_HARVEST_INTERVAL_MS) {
         const auto& networks = WiFiScanner::getInstance().getNetworks();
         for (const auto& net : networks) {
             appendObservation(net.ssid.c_str(), net.bssid, net.rssi, net.channel,
