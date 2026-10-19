@@ -39,6 +39,11 @@ constexpr size_t MESSAGE_BUF = 64;
 // Baseline offset of row text within a LIST_ROW_HEIGHT (14px) row, centring the 8px font.
 constexpr int16_t LIST_ROW_TEXT_DY = 3;
 
+// Why the main-menu Learn row is greyed out: no IR receiver module is present. Shown as an
+// inline tag on the disabled row so the operator sees the reason, since skip-nav means the row
+// can no longer be selected to surface it (slice-0072).
+constexpr const char* LEARN_DISABLED_TAG = "  [no IR RX]";
+
 // Move a wrapping list cursor with ;/. and follow it with the scroll window.
 // Returns true iff @p key was an up/down key. (Same idiom as RadioScreen.)
 bool listNav(char key, int& selection, int count, int& scroll, int visible) {
@@ -91,10 +96,12 @@ void IrRecordScreen::show() {
     shouldExit_ = false;
     needsRedraw_ = true;
     state_ = MenuState::MAIN;
-    mainSelection_ = 0;
     captureStage_ = 0;
 
     captureAvailable_ = ir::hasIrRx();
+    // Start past the Learn row when it is disabled (no IR RX module), so the selection never
+    // lands on a greyed, unselectable entry (slice-0072).
+    mainSelection_ = firstEnabledMain();
 
     lastHintState_ = state_;
     updateFooterHints();
@@ -391,7 +398,18 @@ bool IrRecordScreen::handleInput(char key) {
     int unusedScroll = 0;
     switch (state_) {
         case MenuState::MAIN:
-            if (listNav(key, mainSelection_, 3, unusedScroll, 3)) return true;
+            if (key == ';' || key == '.') {
+                // Wrap through the 3 rows, skipping the Learn row while it is disabled so the
+                // selection never rests on a greyed, unselectable entry (slice-0072).
+                const int dir = (key == ';') ? -1 : 1;
+                int next = mainSelection_;
+                for (int step = 0; step < 3; ++step) {
+                    next = (next + dir + 3) % 3;
+                    if (!(next == 0 && !captureAvailable_)) break;
+                }
+                mainSelection_ = next;
+                return true;
+            }
             if (key == '\n' || key == '\r') {
                 if (mainSelection_ == 0) {
                     if (captureAvailable_) {
@@ -518,29 +536,38 @@ void IrRecordScreen::render(Canvas& canvas) {
 
 #ifdef ESP32
 
+// Selection band for the IR fixed menus, matching ScrollableList's convention (slice-0072):
+// a full-width band at the row top, BG_SELECTED when the menu holds focus and dimmed to
+// BG_SECONDARY when the footer does. Paired with LIST_ROW_TEXT_DY it vertically centres the
+// 8px font in the LIST_ROW_HEIGHT band, so these menus match the saved-codes list.
+static void paintMenuBand(Canvas& canvas, int16_t rowTop, int16_t w, bool focused) {
+    canvas.fillRect(0, rowTop, w, theme::LIST_ROW_HEIGHT,
+                    focused ? theme::BG_SELECTED() : theme::BG_SECONDARY());
+}
+
 void IrRecordScreen::drawMain(Canvas& canvas) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT + 6;
+    const int16_t x = theme::PADDING_MD;
+    int16_t rowTop = HEADER_HEIGHT + 3;  // text lands at +LIST_ROW_TEXT_DY, i.e. the prior baseline
     canvas.setTextSize(1);
+
     canvas.setTextColor(theme::ACCENT());
-    canvas.setCursor(x, y);
+    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
     canvas.printf("IR   TX: %s", txSourceLabel(txSource()));
-    y += ROW_HEIGHT;
+    rowTop += theme::LIST_ROW_HEIGHT;
 
     const char* items[3] = {"Learn (capture)", "Saved codes", "TX source"};
+    const bool focused = !footerHints_.hasFocus();
     for (int i = 0; i < 3; ++i) {
         const bool learnDisabled = (i == 0 && !captureAvailable_);
-        if (i == mainSelection_) {
-            canvas.fillRect(0, y - 2, canvas.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(learnDisabled ? theme::TEXT_DISABLED()
-                                              : theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(learnDisabled ? theme::TEXT_DISABLED()
-                                              : theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
+        const bool selected = (i == mainSelection_);
+        if (selected) paintMenuBand(canvas, rowTop, canvas.width(), focused);
+        canvas.setTextColor(learnDisabled ? theme::TEXT_DISABLED()
+                            : selected     ? theme::TEXT_PRIMARY()
+                                           : theme::TEXT_SECONDARY());
+        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
         canvas.print(items[i]);
-        y += ROW_HEIGHT;
+        if (learnDisabled) canvas.print(LEARN_DISABLED_TAG);  // state the reason it is greyed
+        rowTop += theme::LIST_ROW_HEIGHT;
     }
 }
 
@@ -623,34 +650,34 @@ void IrRecordScreen::drawCodeList(Canvas& canvas) {
 }
 
 void IrRecordScreen::drawCodeAction(Canvas& canvas) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT + 6;
+    const int16_t x = theme::PADDING_MD;
+    int16_t rowTop = HEADER_HEIGHT + 3;
     canvas.setTextSize(1);
     canvas.setTextColor(theme::ACCENT());
-    canvas.setCursor(x, y);
+    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
     canvas.printf("%.26s", codes_[codeList_.selectedIndex()].name);
-    y += ROW_HEIGHT;
+    rowTop += theme::LIST_ROW_HEIGHT;
 
     const char* items[2] = {"Replay", "Delete"};
+    const bool focused = !footerHints_.hasFocus();
     for (int i = 0; i < 2; ++i) {
-        if (i == actionSelection_) {
-            canvas.fillRect(0, y - 2, canvas.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(i == 1 ? theme::WARNING() : theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
+        const bool selected = (i == actionSelection_);
+        if (selected) paintMenuBand(canvas, rowTop, canvas.width(), focused);
+        canvas.setTextColor(selected    ? theme::TEXT_PRIMARY()
+                            : i == 1     ? theme::WARNING()  // Delete reads as a warning
+                                         : theme::TEXT_SECONDARY());
+        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
         canvas.print(items[i]);
-        y += ROW_HEIGHT;
+        rowTop += theme::LIST_ROW_HEIGHT;
     }
 
     // Encoding + preview of the selected code, below the actions.
     if (actionSignalValid_) {
-        drawEncodingAndStrip(canvas, actionSignal_, x, y + 2,
+        drawEncodingAndStrip(canvas, actionSignal_, x, rowTop + 2,
                              static_cast<int16_t>(canvas.width() - 2 * theme::PADDING_MD));
     } else {
         canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(x, y + 2);
+        canvas.setCursor(x, rowTop + 2);
         canvas.print("Encoding unavailable");
     }
 }
@@ -670,24 +697,22 @@ void IrRecordScreen::drawConfirm(Canvas& canvas, const char* question) {
 }
 
 void IrRecordScreen::drawTxSourceSelect(Canvas& canvas) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT + 6;
+    const int16_t x = theme::PADDING_MD;
+    int16_t rowTop = HEADER_HEIGHT + 3;
     canvas.setTextSize(1);
     canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(x, y);
+    canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
     canvas.print("Transmit via");
-    y += ROW_HEIGHT;
+    rowTop += theme::LIST_ROW_HEIGHT;
     const ir::IrTxSource sources[2] = {ir::IrTxSource::BuiltIn, ir::IrTxSource::CapArray};
+    const bool focused = !footerHints_.hasFocus();
     for (int i = 0; i < 2; ++i) {
-        if (i == txSelection_) {
-            canvas.fillRect(0, y - 2, canvas.width(), ROW_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        canvas.setCursor(x, y);
+        const bool selected = (i == txSelection_);
+        if (selected) paintMenuBand(canvas, rowTop, canvas.width(), focused);
+        canvas.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+        canvas.setCursor(x, rowTop + LIST_ROW_TEXT_DY);
         canvas.print(txSourceLabel(sources[i]));
-        y += ROW_HEIGHT;
+        rowTop += theme::LIST_ROW_HEIGHT;
     }
 }
 

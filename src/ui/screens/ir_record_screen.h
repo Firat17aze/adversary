@@ -83,6 +83,10 @@ private:
     void drawConfirm(Canvas& canvas, const char* question);
     void drawTxSourceSelect(Canvas& canvas);
 
+    // First selectable main-menu index: the Learn row (0) is unselectable while IR RX is absent,
+    // so the selection starts and stays on an enabled row (slice-0072).
+    int firstEnabledMain() const { return captureAvailable_ ? 0 : 1; }
+
     // Draws a signal's encoding summary (RAW dimmed vs decoded) plus, for a raw
     // train, its static pulse-strip preview. Shared by the capture-review and
     // code-detail screens so both read a captured code the same way.
