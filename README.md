@@ -154,11 +154,12 @@ The Adversary is in alpha. Everything builds and runs, but features differ in ho
 Scanner · Packet Sniffer · Handshake Capture (4-way / PMKID / EAPOL) + Auto Hunt · Deauth ·
 Evil Twin + captive portal + Traffic Proxy · Karma · Beacon Spam / Probe Flood · Wardriving +
 WiGLE · Captures Browser · Cloud sync (WPA-SEC / pwncrack) · Web Dashboard · BadUSB · Mouse
-Jiggler · IR TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam.
+Jiggler · IR TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam · RFID Audit ·
+RFID Write / Clone.
 
 **Experimental — works, but hardware verification is still in progress**
 Sub-GHz OOK replay (transmit) · Sub-GHz FSK capture/replay · Sub-GHz Jamming · 2.4 GHz Spectrum
-Analyzer · BadBLE (known re-pair-after-reflash quirk) · RFID Audit · BLE Identity Spoof.
+Analyzer · BadBLE (known re-pair-after-reflash quirk) · BLE Identity Spoof.
 
 ---
 
