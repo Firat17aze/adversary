@@ -120,6 +120,8 @@ void BadUsbScreen::show() {
     m_state = State::CONFIRM;
     m_footer.setHints({{'`', "Back", true}});
 #endif
+
+    m_footer.setFocus(false);  // never carry footer focus across visits
 }
 
 void BadUsbScreen::hide() {
@@ -271,7 +273,7 @@ void BadUsbScreen::drawIdle(Canvas& canvas) {
                 c.setCursor(config::SCREEN_WIDTH - 22, rowY + 2);
                 c.print("SD");
             }
-        });
+        }, !m_footer.hasFocus());  // dim the band while the footer holds focus
 }
 
 void BadUsbScreen::drawRunning(Canvas& canvas) {
@@ -322,6 +324,20 @@ bool BadUsbScreen::handleInput(char key) {
     m_needsRedraw = true;
 
     if (m_state == State::ACTIVATING) return true;
+
+    // Footer focus, screen-wide: SPACE toggles focus, ;/. cycle the hints, Enter fires the
+    // selected one. Placed before the per-state handling so every interactive state (the CONFIRM
+    // decision, the IDLE list, RUNNING/DONE) honors SPACE the same way; the band only exists in
+    // IDLE, so elsewhere the focused footer badge is the cue. Transient ACTIVATING is excluded by
+    // the guard above. When unfocused, handleInputWithDispatch consumes only SPACE, so every
+    // direct key still falls through to its state handler below.
+    {
+        char footerAction = 0;
+        if (m_footer.handleInputWithDispatch(key, footerAction)) {
+            if (footerAction) return handleInput(footerAction);  // dispatch the focused hint
+            return true;  // consumed a focus toggle or hint navigation
+        }
+    }
 
     if (m_state == State::CONFIRM) {
         if (key == '\n') {
